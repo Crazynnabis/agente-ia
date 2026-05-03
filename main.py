@@ -1,6 +1,7 @@
 import asyncio
 import signal
 import sys
+sys.stdout.reconfigure(encoding="utf-8")
 from loguru import logger
 from dotenv import load_dotenv
 
