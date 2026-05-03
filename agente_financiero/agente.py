@@ -7,6 +7,7 @@ from typing import Any
 import anthropic
 from loguru import logger
 
+from base_datos.repositorios import guardar_inversion
 from nucleo.agente_base import AgenteBase
 
 
@@ -186,7 +187,8 @@ class AgenteFinanciero(AgenteBase):
             }
         ]
 
-        # Agentic loop: continúa mientras Claude use herramientas
+        metricas_guardadas: dict = {}
+
         while True:
             async with self._cliente.messages.stream(
                 model="claude-opus-4-7",
@@ -204,7 +206,6 @@ class AgenteFinanciero(AgenteBase):
             ) as stream:
                 respuesta = await stream.get_final_message()
 
-            # Extraer llamadas a herramientas
             tool_uses = [b for b in respuesta.content if b.type == "tool_use"]
 
             if respuesta.stop_reason == "end_turn" or not tool_uses:
@@ -213,18 +214,30 @@ class AgenteFinanciero(AgenteBase):
                 )
                 if texto:
                     logger.info(f"{self.nombre} [{simbolo}]: {texto.strip()}")
+                    await guardar_inversion({
+                        "simbolo": simbolo,
+                        "rendimiento_pct": metricas_guardadas.get("rendimiento_total_pct"),
+                        "volatilidad_pct": metricas_guardadas.get("volatilidad_anualizada_pct"),
+                        "rsi": metricas_guardadas.get("rsi_14"),
+                        "senal": metricas_guardadas.get("señal_rsi"),
+                        "analisis": texto.strip(),
+                    })
                 break
 
-            # Ejecutar herramientas y continuar el loop
             mensajes.append({"role": "assistant", "content": respuesta.content})
-            resultados = [
-                {
+            resultados = []
+            for tu in tool_uses:
+                resultado_json = _ejecutar_herramienta(tu.name, tu.input)
+                resultados.append({
                     "type": "tool_result",
                     "tool_use_id": tu.id,
-                    "content": _ejecutar_herramienta(tu.name, tu.input),
-                }
-                for tu in tool_uses
-            ]
+                    "content": resultado_json,
+                })
+                if tu.name == "calcular_metricas":
+                    try:
+                        metricas_guardadas = json.loads(resultado_json)
+                    except Exception:
+                        pass
             mensajes.append({"role": "user", "content": resultados})
             logger.debug(
                 f"{self.nombre}: ejecutadas {len(tool_uses)} herramientas, "

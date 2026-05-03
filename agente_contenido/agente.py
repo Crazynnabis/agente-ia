@@ -7,6 +7,7 @@ from typing import Any
 import anthropic
 from loguru import logger
 
+from base_datos.repositorios import guardar_contenido
 from nucleo.agente_base import AgenteBase
 
 
@@ -214,6 +215,8 @@ class AgenteContenido(AgenteBase):
             }
         ]
 
+        mejor_evaluacion: dict = {}
+
         while True:
             async with self._cliente.messages.stream(
                 model="claude-opus-4-7",
@@ -241,17 +244,34 @@ class AgenteContenido(AgenteBase):
                     logger.info(
                         f"{self.nombre} [{plataforma}/{categoria}]: {texto.strip()}"
                     )
+                    await guardar_contenido({
+                        "plataforma": plataforma,
+                        "categoria": categoria,
+                        "tema": mejor_evaluacion.get("tema"),
+                        "formato": mejor_evaluacion.get("formato"),
+                        "alcance_estimado": mejor_evaluacion.get("alcance_estimado"),
+                        "engagement_pct": mejor_evaluacion.get("engagement_estimado_pct"),
+                        "brief": texto.strip(),
+                    })
                 break
 
             mensajes.append({"role": "assistant", "content": respuesta.content})
-            resultados = [
-                {
+            resultados = []
+            for tu in tool_uses:
+                resultado_json = _ejecutar_herramienta(tu.name, tu.input)
+                resultados.append({
                     "type": "tool_result",
                     "tool_use_id": tu.id,
-                    "content": _ejecutar_herramienta(tu.name, tu.input),
-                }
-                for tu in tool_uses
-            ]
+                    "content": resultado_json,
+                })
+                if tu.name == "evaluar_contenido":
+                    try:
+                        eval_data = json.loads(resultado_json)
+                        puntuacion = eval_data.get("puntuacion_potencial", 0)
+                        if puntuacion > mejor_evaluacion.get("puntuacion_potencial", -1):
+                            mejor_evaluacion = eval_data
+                    except Exception:
+                        pass
             mensajes.append({"role": "user", "content": resultados})
             logger.debug(
                 f"{self.nombre}: ejecutadas {len(tool_uses)} herramientas, "

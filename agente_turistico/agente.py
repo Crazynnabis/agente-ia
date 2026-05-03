@@ -7,6 +7,7 @@ from typing import Any
 import anthropic
 from loguru import logger
 
+from base_datos.repositorios import guardar_noticia
 from nucleo.agente_base import AgenteBase
 
 
@@ -291,6 +292,8 @@ class AgenteTuristico(AgenteBase):
             }
         ]
 
+        info_destino_guardada: dict = {}
+
         while True:
             async with self._cliente.messages.stream(
                 model="claude-opus-4-7",
@@ -318,17 +321,33 @@ class AgenteTuristico(AgenteBase):
                     logger.info(
                         f"{self.nombre} [{destino}/{presupuesto}]: {texto.strip()}"
                     )
+                    mejor_epoca = info_destino_guardada.get("mejor_epoca")
+                    await guardar_noticia({
+                        "destino": destino,
+                        "presupuesto": presupuesto,
+                        "dias": dias,
+                        "costo_diario_usd": info_destino_guardada.get("costo_diario_usd"),
+                        "mejor_epoca": (
+                            ", ".join(mejor_epoca) if isinstance(mejor_epoca, list) else mejor_epoca
+                        ),
+                        "recomendacion": texto.strip(),
+                    })
                 break
 
             mensajes.append({"role": "assistant", "content": respuesta.content})
-            resultados = [
-                {
+            resultados = []
+            for tu in tool_uses:
+                resultado_json = _ejecutar_herramienta(tu.name, tu.input)
+                resultados.append({
                     "type": "tool_result",
                     "tool_use_id": tu.id,
-                    "content": _ejecutar_herramienta(tu.name, tu.input),
-                }
-                for tu in tool_uses
-            ]
+                    "content": resultado_json,
+                })
+                if tu.name == "obtener_info_destino":
+                    try:
+                        info_destino_guardada = json.loads(resultado_json)
+                    except Exception:
+                        pass
             mensajes.append({"role": "user", "content": resultados})
             logger.debug(
                 f"{self.nombre}: ejecutadas {len(tool_uses)} herramientas, "
