@@ -1,0 +1,48 @@
+# IA y LLM
+anthropic>=0.40.0
+openai>=1.50.0
+
+# Framework web y API
+fastapi>=0.115.0
+uvicorn[standard]>=0.32.0
+httpx>=0.27.0
+
+# Base de datos
+sqlalchemy>=2.0.0
+alembic>=1.13.0
+aiosqlite>=0.20.0
+
+# Validación y configuración
+pydantic>=2.9.0
+pydantic-settings>=2.6.0
+python-dotenv>=1.0.0
+
+# Procesamiento de datos (agente financiero)
+pandas>=2.2.0
+numpy>=2.1.0
+
+# Procesamiento de texto y contenido (agente contenido)
+tiktoken>=0.8.0
+beautifulsoup4>=4.12.0
+markdown>=3.7.0
+
+# Geolocalización y mapas (agente turístico)
+geopy>=2.4.0
+folium>=0.18.0
+
+# Comunicación entre agentes
+aiohttp>=3.10.0
+redis>=5.2.0
+
+# Logging y observabilidad
+loguru>=0.7.0
+rich>=13.9.0
+
+# Testing
+pytest>=8.3.0
+pytest-asyncio>=0.24.0
+pytest-cov>=6.0.0
+
+# Utilidades
+tenacity>=9.0.0
+schedule>=1.2.0
