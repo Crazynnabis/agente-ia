@@ -7,8 +7,12 @@ create table if not exists "Inversiones" (
     rsi               numeric(5, 1),
     senal             text,
     analisis          text,
+    fuente            text        not null default 'simulado',
     created_at    timestamptz not null default now()
 );
+
+-- Migración: añadir columna fuente si la tabla ya existe
+alter table "Inversiones" add column if not exists fuente text not null default 'simulado';
 
 -- Tabla: Contenido (AgenteContenido)
 create table if not exists "Contenido" (
