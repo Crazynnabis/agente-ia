@@ -1,0 +1,128 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Dashboard · Agentes IA</title>
+  <link rel="stylesheet" href="/static/styles.css" />
+</head>
+<body>
+  <header class="topbar">
+    <div class="brand">
+      <span class="logo-dot"></span>
+      <h1>Sistema de Agentes IA</h1>
+    </div>
+    <div class="topbar-right">
+      <span id="conexion" class="badge badge-ok">conectado</span>
+      <span id="ultima-actualizacion" class="muted">—</span>
+    </div>
+  </header>
+
+  <main>
+    <section class="metricas" aria-label="Métricas globales">
+      <div class="metrica">
+        <span class="metrica-label">Agentes activos</span>
+        <span class="metrica-valor" id="m-activos">—</span>
+        <span class="metrica-sub" id="m-activos-sub">de 3</span>
+      </div>
+      <div class="metrica">
+        <span class="metrica-label">Ciclos completados</span>
+        <span class="metrica-valor" id="m-ciclos">—</span>
+        <span class="metrica-sub" id="m-ciclos-sub">tasa éxito —</span>
+      </div>
+      <div class="metrica">
+        <span class="metrica-label">Registros en BD</span>
+        <span class="metrica-valor" id="m-total">—</span>
+        <span class="metrica-sub" id="m-total-sub">—</span>
+      </div>
+      <div class="metrica">
+        <span class="metrica-label">Errores</span>
+        <span class="metrica-valor" id="m-errores">—</span>
+        <span class="metrica-sub">en ciclos recientes</span>
+      </div>
+    </section>
+
+    <section class="agentes" aria-label="Estado de los agentes">
+      <article class="agente-card" data-agente="AgenteFinanciero">
+        <header class="agente-header acento-fin">
+          <span class="agente-icono">$</span>
+          <h2>Agente Financiero</h2>
+          <span class="estado-badge" data-campo="estado">—</span>
+        </header>
+        <dl class="agente-info">
+          <div><dt>Última tarea</dt><dd data-campo="ultima_tarea">—</dd></div>
+          <div><dt>Último ciclo</dt><dd data-campo="ultimo_ciclo">—</dd></div>
+          <div><dt>Ciclos OK / Err</dt><dd data-campo="ciclos">— / —</dd></div>
+          <div class="campo-error oculto"><dt>Último error</dt><dd data-campo="ultimo_error">—</dd></div>
+        </dl>
+      </article>
+
+      <article class="agente-card" data-agente="AgenteContenido">
+        <header class="agente-header acento-cont">
+          <span class="agente-icono">#</span>
+          <h2>Agente de Contenido</h2>
+          <span class="estado-badge" data-campo="estado">—</span>
+        </header>
+        <dl class="agente-info">
+          <div><dt>Última tarea</dt><dd data-campo="ultima_tarea">—</dd></div>
+          <div><dt>Último ciclo</dt><dd data-campo="ultimo_ciclo">—</dd></div>
+          <div><dt>Ciclos OK / Err</dt><dd data-campo="ciclos">— / —</dd></div>
+          <div class="campo-error oculto"><dt>Último error</dt><dd data-campo="ultimo_error">—</dd></div>
+        </dl>
+      </article>
+
+      <article class="agente-card" data-agente="AgenteTuristico">
+        <header class="agente-header acento-tur">
+          <span class="agente-icono">✈</span>
+          <h2>Agente Turístico</h2>
+          <span class="estado-badge" data-campo="estado">—</span>
+        </header>
+        <dl class="agente-info">
+          <div><dt>Última tarea</dt><dd data-campo="ultima_tarea">—</dd></div>
+          <div><dt>Último ciclo</dt><dd data-campo="ultimo_ciclo">—</dd></div>
+          <div><dt>Ciclos OK / Err</dt><dd data-campo="ciclos">— / —</dd></div>
+          <div class="campo-error oculto"><dt>Último error</dt><dd data-campo="ultimo_error">—</dd></div>
+        </dl>
+      </article>
+    </section>
+
+    <section class="resultados">
+      <article class="resultados-panel acento-fin-borde">
+        <header class="panel-header">
+          <h3>Últimos análisis financieros</h3>
+          <span class="contador" id="cnt-fin">0</span>
+        </header>
+        <div class="lista" id="lista-financiero">
+          <p class="placeholder">Cargando…</p>
+        </div>
+      </article>
+
+      <article class="resultados-panel acento-cont-borde">
+        <header class="panel-header">
+          <h3>Últimas publicaciones</h3>
+          <span class="contador" id="cnt-cont">0</span>
+        </header>
+        <div class="lista" id="lista-contenido">
+          <p class="placeholder">Cargando…</p>
+        </div>
+      </article>
+
+      <article class="resultados-panel acento-tur-borde">
+        <header class="panel-header">
+          <h3>Últimos itinerarios</h3>
+          <span class="contador" id="cnt-tur">0</span>
+        </header>
+        <div class="lista" id="lista-turistico">
+          <p class="placeholder">Cargando…</p>
+        </div>
+      </article>
+    </section>
+  </main>
+
+  <footer>
+    <span class="muted">Polling cada 5 s · Datos persistentes desde Supabase</span>
+  </footer>
+
+  <script src="/static/app.js"></script>
+</body>
+</html>

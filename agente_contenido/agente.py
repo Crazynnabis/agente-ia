@@ -190,18 +190,23 @@ class AgenteContenido(AgenteBase):
 
     async def ejecutar(self):
         self._activo = True
+        self.estado = "esperando"
         while self._activo:
             try:
                 await self._ciclo_analisis()
+                self._marcar_fin_ok()
             except asyncio.CancelledError:
                 break
             except Exception as exc:
+                self._marcar_error(exc)
                 logger.error(f"{self.nombre}: error en ciclo de análisis: {exc}")
             await asyncio.sleep(45)
+        self.estado = "detenido"
 
     async def _ciclo_analisis(self):
         plataforma = random.choice(PLATAFORMAS)
         categoria = random.choice(CATEGORIAS_POR_PLATAFORMA[plataforma])
+        self._marcar_inicio(f"{plataforma} / {categoria}")
         logger.info(f"{self.nombre}: analizando {plataforma} / {categoria}...")
 
         mensajes: list[dict] = [

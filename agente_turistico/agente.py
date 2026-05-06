@@ -266,19 +266,24 @@ class AgenteTuristico(AgenteBase):
 
     async def ejecutar(self):
         self._activo = True
+        self.estado = "esperando"
         while self._activo:
             try:
                 await self._ciclo_analisis()
+                self._marcar_fin_ok()
             except asyncio.CancelledError:
                 break
             except Exception as exc:
+                self._marcar_error(exc)
                 logger.error(f"{self.nombre}: error en ciclo de análisis: {exc}")
             await asyncio.sleep(60)
+        self.estado = "detenido"
 
     async def _ciclo_analisis(self):
         destino = random.choice(DESTINOS)
         presupuesto = random.choice(PRESUPUESTOS)
         dias = random.randint(3, 7)
+        self._marcar_inicio(f"{destino} ({dias}d, {presupuesto})")
         logger.info(f"{self.nombre}: planificando {destino} ({dias} días, {presupuesto})...")
 
         mensajes: list[dict] = [
