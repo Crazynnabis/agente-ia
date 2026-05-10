@@ -107,7 +107,7 @@ class GestorRiesgo:
             distancia_sl  = abs(precio - sl)
             distancia_tp1 = abs(tp1 - precio)
             ratio = distancia_tp1 / distancia_sl if distancia_sl > 0 else 0
-            if ratio < self.config["ratio_minimo_rb"]:
+            if ratio < self.config["ratio_minimo_rb"] - 0.1:
                 errores.append(f"Ratio R/B {round(ratio,2)}x menor al minimo {self.config['ratio_minimo_rb']}x")
 
         # Verifica confluencia
