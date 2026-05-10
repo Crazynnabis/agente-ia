@@ -61,10 +61,25 @@ async def ejecutar_ciclo_tecnico() -> dict:
             señal_of     == "VENDER",
         ])
 
-        if votos_compra >= 2:
+        # Verifica contradicciones internas en indicadores
+        estoc_señal = ind["estocastico"]["señal"]
+        obv_señal   = ind["obv"]["tendencia"]
+        wr_señal    = ind["williams_r"]["señal"]
+
+        contradicciones_internas = sum([
+            "VENTA" in estoc_señal and votos_compra >= 2,
+            obv_señal == "distribucion" and votos_compra >= 2,
+            "VENTA" in wr_señal and votos_compra >= 2,
+        ])
+
+        if votos_compra >= 2 and contradicciones_internas == 0:
             confluencia     = "ALTA"
             señal_final     = "COMPRAR"
             confianza_final = min(confianza + 15 + (votos_compra * 5), 99)
+        elif votos_compra >= 2 and contradicciones_internas == 1:
+            confluencia     = "MEDIA"
+            señal_final     = "COMPRAR"
+            confianza_final = min(confianza, 70)
         elif votos_venta >= 2:
             confluencia     = "ALTA"
             señal_final     = "VENDER"

@@ -143,10 +143,10 @@ def calcular_atr(highs, lows, closes, periodo=14) -> dict:
 
     atr = np.mean(trs[-periodo:])
     precio = closes[-1]
-    stop_loss_largo  = round(precio - (atr * 1.5), 4)
-    stop_loss_corto  = round(precio + (atr * 1.5), 4)
-    take_profit_1r   = round(precio + (atr * 2.0), 4)
-    take_profit_2r   = round(precio + (atr * 3.0), 4)
+    stop_loss_largo  = round(precio - (atr * 2.5), 4)
+    stop_loss_corto  = round(precio + (atr * 2.5), 4)
+    take_profit_1r   = round(precio + (atr * 5.0), 4)
+    take_profit_2r   = round(precio + (atr * 7.5), 4)
 
     return {
         "atr": round(float(atr), 4),
