@@ -1,8 +1,12 @@
 # agente_financiero/agente_digestor.py
-import ollama
+import asyncio
+import os
+import sys
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
 from datetime import datetime
+from nucleo.cliente_ia import chat
 
-def consolidar_reportes(
+async def consolidar_reportes(
     reporte_noticias: str = "",
     reporte_sentimiento: str = "",
     reporte_macro: str = "",
@@ -10,11 +14,9 @@ def consolidar_reportes(
     reporte_fundamental: str = "",
     reporte_youtube: str = "",
 ) -> dict:
-
     timestamp = datetime.now().strftime("%Y-%m-%d %H:%M")
-
     contexto = f"""
-FECHA Y HORA: {timestamp}
+FECHA: {timestamp}
 
 === NOTICIAS FINANCIERAS ===
 {reporte_noticias or 'Sin datos'}
@@ -25,82 +27,52 @@ FECHA Y HORA: {timestamp}
 === CONTEXTO MACRO Y GEOPOLITICO ===
 {reporte_macro or 'Sin datos'}
 
-=== ANALISIS HISTORICO Y PATRONES ===
+=== ANALISIS HISTORICO ===
 {reporte_historico or 'Sin datos'}
 
 === ANALISIS FUNDAMENTAL ===
 {reporte_fundamental or 'Sin datos'}
 
-=== ANALISIS DE VIDEOS YOUTUBE ===
+=== VIDEOS YOUTUBE ===
 {reporte_youtube or 'Sin datos'}
 """
-
-    print("[agente_digestor] Consolidando todos los reportes...")
-    respuesta = ollama.chat(
-        model="llama3.2",
-        messages=[
-            {
-                "role": "system",
-                "content": "Eres un digestor de inteligencia financiera. Recibes reportes de multiples sub-agentes y los consolidas en un reporte ejecutivo estructurado para el agente financiero principal. El reporte debe ser claro, accionable y priorizado. Responde en espanol."
-            },
-            {
-                "role": "user",
-                "content": "Consolida estos reportes en un reporte ejecutivo:\n" + contexto
-            }
-        ]
+    print("[agente_digestor] Consolidando reportes...")
+    reporte = await chat(
+        mensajes=[{"role": "user", "content": "Consolida estos reportes en un reporte ejecutivo:\n" + contexto}],
+        system="Eres un digestor de inteligencia financiera. Consolida reportes de múltiples sub-agentes en un reporte ejecutivo claro, priorizado y accionable. Identifica las mejores oportunidades de inversión y las señales de mayor certeza. Responde en español.",
+        max_tokens=1000
     )
 
-    reporte_consolidado = respuesta["message"]["content"]
-
-    print("[agente_digestor] Generando decision final...")
-    decision = ollama.chat(
-        model="llama3.2",
-        messages=[
-            {
-                "role": "system",
-                "content": "Eres el agente financiero principal. Basandote en el reporte ejecutivo, toma una decision de inversion clara. Formato: ACCION (COMPRAR/VENDER/MANTENER), SIMBOLO, RAZON (1 oracion), CONFIANZA (1-10), HORIZONTE (dias/semanas). Maximo 5 decisiones. Responde en espanol."
-            },
-            {
-                "role": "user",
-                "content": "Basandote en este reporte, toma decisiones de inversion:\n" + reporte_consolidado
-            }
-        ]
+    print("[agente_digestor] Generando decisiones finales...")
+    decision = await chat(
+        mensajes=[{"role": "user", "content": "Basándote en este reporte, toma decisiones de inversión:\n" + reporte["texto"]}],
+        system="Eres el agente financiero principal. Toma decisiones claras de inversión. Formato: ACCION (COMPRAR/VENDER/MANTENER), SIMBOLO, RAZON (1 oración), CONFIANZA (1-10), HORIZONTE. Máximo 5 decisiones priorizadas por oportunidad. Responde en español.",
+        max_tokens=600
     )
 
     return {
-        "timestamp": timestamp,
-        "reporte_consolidado": reporte_consolidado,
-        "decisiones": decision["message"]["content"],
-        "modelo": "llama3.2"
+        "timestamp":          timestamp,
+        "reporte_consolidado": reporte["texto"],
+        "decisiones":         decision["texto"],
+        "modelo":             reporte["modelo"]
     }
 
-
-def ejecutar_ciclo_completo() -> dict:
+async def ejecutar_ciclo_completo() -> dict:
     from agente_financiero.noticias_web import obtener_noticias_mercado
     from agente_financiero.agente_sentimiento import obtener_reporte_sentimiento
     from agente_financiero.agente_macro import obtener_reporte_macro
     from agente_financiero.agente_historico import obtener_reporte_historico
     from agente_financiero.agente_fundamental import obtener_reporte_fundamental
 
-    print("\n=== INICIANDO CICLO COMPLETO DE ANALISIS ===\n")
+    print("\n=== INICIANDO CICLO COMPLETO ===\n")
 
-    print("[1/5] Noticias financieras...")
-    noticias = obtener_noticias_mercado()
+    noticias    = obtener_noticias_mercado()
+    sentimiento = await obtener_reporte_sentimiento()
+    macro       = await obtener_reporte_macro()
+    historico   = await obtener_reporte_historico()
+    fundamental = await obtener_reporte_fundamental()
 
-    print("[2/5] Sentimiento de mercado...")
-    sentimiento = obtener_reporte_sentimiento()
-
-    print("[3/5] Contexto macro...")
-    macro = obtener_reporte_macro()
-
-    print("[4/5] Analisis historico...")
-    historico = obtener_reporte_historico()
-
-    print("[5/5] Analisis fundamental...")
-    fundamental = obtener_reporte_fundamental()
-
-    print("\n[DIGESTOR] Consolidando todo...")
-    resultado = consolidar_reportes(
+    resultado = await consolidar_reportes(
         reporte_noticias=noticias,
         reporte_sentimiento=sentimiento,
         reporte_macro=macro,
@@ -110,7 +82,8 @@ def ejecutar_ciclo_completo() -> dict:
 
     print("\n=== REPORTE EJECUTIVO ===")
     print(resultado["reporte_consolidado"])
-    print("\n=== DECISIONES DE INVERSION ===")
+    print("\n=== DECISIONES ===")
     print(resultado["decisiones"])
+    print(f"\nModelo usado: {resultado['modelo']}")
 
     return resultado
