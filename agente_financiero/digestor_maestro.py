@@ -193,6 +193,25 @@ Responde en español sin texto adicional.""",
         modelo_usado=respuesta.get("modelo", "N/A")
     )
 
+    
+    # Ejecuta ordenes aprobadas en Alpaca
+    from agente_financiero.ejecutor_alpaca import ejecutar_orden, obtener_portafolio
+    ordenes_ejecutadas = []
+    for señal in señales_aprobadas:
+        t = señal.get("tamaño_posicion", {})
+        if t.get("cantidad", 0) > 0:
+            orden = ejecutar_orden(
+                simbolo=señal["simbolo"],
+                accion=señal["accion"],
+                cantidad=t["cantidad"],
+                precio_entrada=señal["precio"],
+                stop_loss=señal["stop_loss"],
+                take_profit=señal["take_profit_1"],
+                atr=señal.get("atr_pct", 0)
+            )
+            ordenes_ejecutadas.append(orden)
+            print(f"[MAESTRO] Orden ejecutada: {señal['simbolo']} {señal['accion']}")
+
     return {
         "timestamp":         timestamp,
         "duracion_segundos": round(duracion, 1),
@@ -200,6 +219,7 @@ Responde en español sin texto adicional.""",
         "tabla_maestra":     tabla_maestra,
         "señales_fuertes":   señales_fuertes,
         "señales_aprobadas": señales_aprobadas,
+        "ordenes_ejecutadas": ordenes_ejecutadas,
         "decision_maestra":  respuesta["texto"],
         "modelo":            respuesta["modelo"],
         "estadisticas_dia":  stats,
