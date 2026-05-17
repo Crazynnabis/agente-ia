@@ -30,14 +30,7 @@ async def ejecutar_ciclo_estrategias() -> dict:
         asyncio.to_thread(obtener_señal_vix),
     )
 
-    # Agrega señal VIX a QQQ y SPY
-    if "error" not in vix_res and vix_res.get("accion") != "ESPERAR":
-        for simbolo in ["QQQ", "SPY"]:
-            if simbolo in tabla:
-                tabla[simbolo]["vix"] = vix_res.get("accion", "ESPERAR")
-    print(f"[digestor_estrategias] VIX: {vix_res.get('señal','N/A')} | {vix_res.get('fuerza','N/A')}")
-
-    # Consolida señales por activo
+        # Consolida señales por activo
     tabla = {}
     for activo in ACTIVOS:
         tabla[activo] = {
@@ -80,6 +73,13 @@ async def ejecutar_ciclo_estrategias() -> dict:
             s = "ETHUSDT"
         if s in tabla:
             tabla[s]["news"] = r.get("señal", "ESPERAR")
+
+    # Agrega señal VIX a QQQ y SPY
+    if "error" not in vix_res and vix_res.get("accion") != "ESPERAR":
+        for simbolo in ["QQQ", "SPY"]:
+            if simbolo in tabla:
+                tabla[simbolo]["vix"] = vix_res.get("accion", "ESPERAR")
+    print(f"[digestor_estrategias] VIX: {vix_res.get('señal','N/A')} | {vix_res.get('fuerza','N/A')}")
 
     # Calcula confluencia por activo
     resultados = []
