@@ -26,32 +26,30 @@ class GestorRiesgo:
         self.operaciones_hoy = []
 
     def calcular_tamaño_posicion(self, precio: float, stop_loss: float) -> dict:
-        capital      = self.config["capital_total"]
-        riesgo_pct   = self.config["riesgo_por_operacion"]
-        riesgo_usd   = capital * riesgo_pct
-        distancia_sl = abs(precio - stop_loss)
-
-        if distancia_sl == 0:
-            return {"error": "Stop loss igual al precio de entrada"}
-
-        cantidad     = riesgo_usd / distancia_sl
-
-        # Limite: maximo 20% del capital en una sola posicion
-        valor_posicion = cantidad * precio
-        limite_posicion = capital * 0.20
-        if valor_posicion > limite_posicion:
-            cantidad       = limite_posicion / precio
-            valor_posicion = limite_posicion
-
-        porcentaje_capital = (valor_posicion / capital) * 100
-
-        return {
-            "cantidad":            round(cantidad, 6),
-            "valor_posicion_usd":  round(valor_posicion, 2),
-            "riesgo_usd":          round(riesgo_usd, 2),
-            "porcentaje_capital":  round(porcentaje_capital, 2),
-            "distancia_sl_pct":    round((distancia_sl / precio) * 100, 3),
-        }
+        try:
+            from agente_financiero.kelly_criterion import calcular_tamaño_kelly
+            return calcular_tamaño_kelly(precio, stop_loss)
+        except Exception as e:
+            print(f"[gestion_riesgo] Kelly error: {e} — usando 1% fijo")
+            capital      = self.config["capital_total"]
+            riesgo_usd   = capital * self.config["riesgo_por_operacion"]
+            distancia_sl = abs(precio - stop_loss)
+            if distancia_sl == 0:
+                return {"error": "Stop loss igual al precio"}
+            cantidad       = riesgo_usd / distancia_sl
+            valor_posicion = cantidad * precio
+            limite         = capital * 0.20
+            if valor_posicion > limite:
+                cantidad       = limite / precio
+                valor_posicion = limite
+            return {
+                "cantidad":           round(cantidad, 6),
+                "valor_posicion_usd": round(valor_posicion, 2),
+                "riesgo_usd":         round(riesgo_usd, 2),
+                "porcentaje_capital": round((valor_posicion / capital) * 100, 2),
+                "distancia_sl_pct":   round((distancia_sl / precio) * 100, 3),
+                "fuente":             "fijo_1pct",
+            }
 
     def verificar_horario_optimo(self) -> dict:
         tz    = pytz.timezone(self.config["zona_horaria"])
