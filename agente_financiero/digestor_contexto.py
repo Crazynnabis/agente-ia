@@ -10,19 +10,29 @@ from agente_financiero.agente_macro import analizar_contexto_macro
 from agente_financiero.agente_fundamental import analizar_fundamental_completo
 from agente_financiero.agente_historico import analizar_historico_completo
 from agente_financiero.agente_petroleo import analizar_petroleo_completo
+from agente_financiero.agente_google_trends import ejecutar_google_trends
 
 async def ejecutar_ciclo_contexto() -> dict:
     timestamp = datetime.now().strftime("%H:%M:%S")
     print(f"\n[digestor_contexto] Ciclo contexto {timestamp}")
 
-    print("[1/5] Sentimiento, macro, fundamental, historico, petroleo en paralelo...")
-    sent_res, macro_res, fund_res, hist_res, petro_res = await asyncio.gather(
+    print("[1/6] Sentimiento, macro, fundamental, historico, petroleo, trends en paralelo...")
+    sent_res, macro_res, fund_res, hist_res, petro_res, trends_res = await asyncio.gather(
         analizar_sentimiento_mercado(),
         analizar_contexto_macro(),
         analizar_fundamental_completo(),
         analizar_historico_completo(),
         analizar_petroleo_completo(),
+        asyncio.to_thread(ejecutar_google_trends),
     )
+
+    # Señales de Google Trends
+    trends_señales = [t for t in trends_res if t.get("señal") not in ["ESPERAR", None]]
+    trends_resumen = "\n".join([
+        f"{t['simbolo']}: {t['señal']} | valor={t['valor_actual']} vs prom={t['promedio_3m']} | {t['razon']}"
+        for t in trends_señales
+    ]) if trends_señales else "Sin señales de trends"
+    print(f"[digestor_contexto] Trends: {len(trends_señales)} señales")
 
     # Extrae señales clave de cada fuente
     fear_greed    = sent_res.get("fear_greed", {})
@@ -89,6 +99,9 @@ HISTORICO:
 PETROLEO:
 WTI=${wti_precio} ({wti_cambio}% hoy)
 {petro_analisis[:400]}
+
+GOOGLE TRENDS:
+{trends_resumen}
 """
 
     print("[digestor_contexto] Generando analisis consolidado con IA...")
