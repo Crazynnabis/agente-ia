@@ -10,6 +10,7 @@ from agente_financiero.agente_vwap_reversion import ejecutar_vwap_reversion
 from agente_financiero.agente_gap_go import ejecutar_gap_go
 from agente_financiero.agente_mean_reversion import ejecutar_mean_reversion
 from agente_financiero.agente_news_momentum import ejecutar_news_momentum
+from agente_financiero.agente_vix_nasdaq import obtener_señal_actual as obtener_señal_vix
 
 ACTIVOS = ["BTCUSDT", "ETHUSDT", "SOLUSDT", "BNBUSDT",
            "AAPL", "NVDA", "MSFT", "TSLA", "SPY", "QQQ"]
@@ -20,13 +21,21 @@ async def ejecutar_ciclo_estrategias() -> dict:
 
     # Corre todas las estrategias en paralelo
     print("[1/5] ORB, VWAP, Gap, Mean, News en paralelo...")
-    orb_res, vwap_res, gap_res, mean_res, news_res = await asyncio.gather(
+    orb_res, vwap_res, gap_res, mean_res, news_res, vix_res = await asyncio.gather(
         asyncio.to_thread(ejecutar_analisis_orb),
         asyncio.to_thread(ejecutar_vwap_reversion),
         asyncio.to_thread(ejecutar_gap_go),
         asyncio.to_thread(ejecutar_mean_reversion),
         asyncio.to_thread(ejecutar_news_momentum),
+        asyncio.to_thread(obtener_señal_vix),
     )
+
+    # Agrega señal VIX a QQQ y SPY
+    if "error" not in vix_res and vix_res.get("accion") != "ESPERAR":
+        for simbolo in ["QQQ", "SPY"]:
+            if simbolo in tabla:
+                tabla[simbolo]["vix"] = vix_res.get("accion", "ESPERAR")
+    print(f"[digestor_estrategias] VIX: {vix_res.get('señal','N/A')} | {vix_res.get('fuerza','N/A')}")
 
     # Consolida señales por activo
     tabla = {}
@@ -38,6 +47,7 @@ async def ejecutar_ciclo_estrategias() -> dict:
             "gap":     None,
             "mean":    None,
             "news":    None,
+            "vix":     None,
         }
 
     # Llena tabla con resultados
