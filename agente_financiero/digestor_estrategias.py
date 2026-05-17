@@ -11,6 +11,8 @@ from agente_financiero.agente_gap_go import ejecutar_gap_go
 from agente_financiero.agente_mean_reversion import ejecutar_mean_reversion
 from agente_financiero.agente_news_momentum import ejecutar_news_momentum
 from agente_financiero.agente_vix_nasdaq import obtener_señal_actual as obtener_señal_vix
+from agente_financiero.agente_arbitraje import ejecutar_arbitraje
+from agente_financiero.agente_manipulacion import analizar_manipulacion_completo
 
 ACTIVOS = ["BTCUSDT", "ETHUSDT", "SOLUSDT", "BNBUSDT",
            "AAPL", "NVDA", "MSFT", "TSLA", "SPY", "QQQ"]
@@ -21,14 +23,33 @@ async def ejecutar_ciclo_estrategias() -> dict:
 
     # Corre todas las estrategias en paralelo
     print("[1/5] ORB, VWAP, Gap, Mean, News en paralelo...")
-    orb_res, vwap_res, gap_res, mean_res, news_res, vix_res = await asyncio.gather(
+    orb_res, vwap_res, gap_res, mean_res, news_res, vix_res, arb_res, manip_res = await asyncio.gather(
         asyncio.to_thread(ejecutar_analisis_orb),
         asyncio.to_thread(ejecutar_vwap_reversion),
         asyncio.to_thread(ejecutar_gap_go),
         asyncio.to_thread(ejecutar_mean_reversion),
         asyncio.to_thread(ejecutar_news_momentum),
         asyncio.to_thread(obtener_señal_vix),
+        asyncio.to_thread(ejecutar_arbitraje),
+        asyncio.to_thread(analizar_manipulacion_completo),
     )
+
+    # Procesa señales de arbitraje
+    for r in arb_res:
+        if r.get("fuerza") in ["alta", "muy_alta"]:
+            sim_a = r.get("simbolo_a", "")
+            sim_b = r.get("simbolo_b", "")
+            if sim_a in tabla:
+                tabla[sim_a]["arb"] = r.get("accion_a", "ESPERAR")
+            if sim_b in tabla:
+                tabla[sim_b]["arb"] = r.get("accion_b", "ESPERAR")
+
+    # Procesa señales de manipulacion — bloquea activos manipulados
+    for r in manip_res:
+        sim = r.get("simbolo", "")
+        if r.get("debe_evitar") and sim in tabla:
+            tabla[sim]["manipulado"] = True
+            print(f"[digestor_estrategias] ALERTA: {sim} posiblemente manipulado — señales bloqueadas")
 
         # Consolida señales por activo
     tabla = {}
@@ -41,6 +62,8 @@ async def ejecutar_ciclo_estrategias() -> dict:
             "mean":    None,
             "news":    None,
             "vix":     None,
+            "arb":     None,
+            "manipulado": False,
         }
 
     # Llena tabla con resultados
@@ -109,6 +132,12 @@ async def ejecutar_ciclo_estrategias() -> dict:
             señal_final = "ESPERAR"
             confluencia = "BAJA"
             confianza   = 30
+
+        # Si el activo está manipulado no operar
+        if datos.get("manipulado"):
+            señal_final = "ESPERAR"
+            confluencia = "BAJA"
+            confianza   = 0
 
         resultados.append({
             "simbolo":      activo,
