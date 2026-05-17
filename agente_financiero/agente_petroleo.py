@@ -25,7 +25,7 @@ ACTIVOS_PETROLEO = {
         "Schlumberger":"SLB",
         "ConocoPhil": "COP",
         "Halliburton":"HAL",
-        "PEMEX_ETF":  "AMXL.MX",
+        "Pioneer":    "PXD",
     },
     "etfs": {
         "Oil_ETF":    "USO",
