@@ -101,6 +101,23 @@ def ejecutar_orden(simbolo: str, accion: str, cantidad: float,
 
         print(f"[alpaca] Ejecutando {accion} {cantidad} {simbolo_alpaca}...")
 
+        # Verifica posiciones existentes antes de vender
+        if accion == "VENDER":
+            posiciones = obtener_posiciones()
+            pos_actual = next((p for p in posiciones if simbolo in p["simbolo"] or simbolo_alpaca in p["simbolo"]), None)
+            
+            if pos_actual:
+                # Tiene posicion larga — cierra la posicion existente
+                cantidad_disponible = float(pos_actual["cantidad"])
+                cantidad = min(cantidad, cantidad_disponible)
+                print(f"[alpaca] Cerrando posicion existente: {cantidad} {simbolo_alpaca}")
+            else:
+                # No tiene posicion — verifica si puede hacer short
+                cuenta = obtener_cliente().get_account()
+                if not getattr(cuenta, 'shorting_enabled', False):
+                    print(f"[alpaca] Sin posicion de {simbolo} y short no habilitado — orden cancelada")
+                    return {"error": "Sin posicion para vender y short no habilitado", "simbolo": simbolo}
+
         orden_request = MarketOrderRequest(
             symbol=simbolo_alpaca,
             qty=round(cantidad, 6),
