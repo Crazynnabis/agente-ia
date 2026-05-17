@@ -204,9 +204,9 @@ Analisis: {ciclo_contexto['analisis_consolidado'][:300]}
                 simbolo=señal["simbolo"],
                 accion=señal["accion"],
                 cantidad=t["cantidad"],
-                precio_entrada=señal["precio"],
-                stop_loss=señal["stop_loss"],
-                take_profit=señal["take_profit_1"],
+                precio_entrada=señal.get("precio", 0),
+                stop_loss=señal.get("stop_loss", 0),
+                take_profit=señal.get("take_profit_1", 0),
                 atr=señal.get("atr_pct", 0)
             )
             ordenes_ejecutadas.append(orden)
