@@ -13,8 +13,11 @@ ACTIVOS_CRYPTO = ["BTCUSDT", "ETHUSDT", "SOLUSDT", "BNBUSDT"]
 
 def obtener_velas_binance(simbolo: str, intervalo: str = "5m", limite: int = 100) -> pd.DataFrame:
     try:
-        url = "https://api.binance.com/api/v3/klines"
-        r = requests.get(url, params={"symbol": simbolo, "interval": intervalo, "limit": limite}, timeout=10)
+        from agente_financiero.cache_mercado import obtener_velas
+        return obtener_velas(simbolo, intervalo, limite)
+    except Exception as e:
+        print(f"[agente_velas] Error cache {simbolo}: {e}")
+        return pd.DataFrame()
         df = pd.DataFrame(r.json(), columns=[
             "timestamp","open","high","low","close","volume",
             "close_time","quote_volume","trades","taker_buy_base","taker_buy_quote","ignore"

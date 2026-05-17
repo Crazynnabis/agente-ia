@@ -4,7 +4,7 @@ from dotenv import load_dotenv
 load_dotenv()
 
 MODELO_CLAUDE = "claude-opus-4-5"
-MODELO_OLLAMA = "llama3.2"
+MODELO_OLLAMA = "qwen2.5-coder:7b"
 
 async def chat(mensajes: list, system: str = "", max_tokens: int = 1000) -> dict:
     try:

@@ -1,0 +1,1 @@
+worker: python loop_automatico.py

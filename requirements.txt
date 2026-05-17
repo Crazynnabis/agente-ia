@@ -47,3 +47,25 @@ pytest-cov>=6.0.0
 # Utilidades
 tenacity>=9.0.0
 schedule>=1.2.0
+
+alpaca-py
+
+yfinance
+
+firecrawl-py
+
+newsapi-python
+
+ollama
+
+youtube-transcript-api
+
+yt-dlp
+
+chromadb
+
+sentence-transformers
+
+litellm
+
+pytz

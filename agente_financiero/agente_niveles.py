@@ -6,9 +6,11 @@ from datetime import datetime
 
 def obtener_velas_binance(simbolo: str, intervalo: str = "1d", limite: int = 365) -> pd.DataFrame:
     try:
-        url = "https://api.binance.com/api/v3/klines"
-        params = {"symbol": simbolo, "interval": intervalo, "limit": limite}
-        r = requests.get(url, params=params, timeout=10)
+        from agente_financiero.cache_mercado import obtener_velas
+        return obtener_velas(simbolo, intervalo, limite)
+    except Exception as e:
+        print(f"[agente_niveles] Error cache {simbolo}: {e}")
+        return pd.DataFrame()
         df = pd.DataFrame(r.json(), columns=[
             "timestamp","open","high","low","close","volume",
             "close_time","quote_volume","trades","taker_buy_base","taker_buy_quote","ignore"
