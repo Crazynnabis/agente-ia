@@ -9,6 +9,7 @@ from agente_financiero.gestion_riesgo import GestorRiesgo
 from agente_financiero.filtro_tendencia import filtrar_señal_por_tendencia
 from agente_financiero.horario_trading import debe_operar
 from agente_financiero.logger_trading import log_señal, obtener_estadisticas_dia
+from agente_financiero.agente_calendario import analizar_calendario
 
 # Instancia global del gestor
 gestor = GestorRiesgo()
@@ -39,6 +40,22 @@ async def procesar_señal(señal: dict) -> dict:
     resultado["horario"] = horario
     if not horario["operar"]:
         resultado["razones_rechazo"].append(horario["razon"])
+
+    # Verifica calendario economico
+    calendario = analizar_calendario()
+    if calendario["debe_pausar"]:
+        print(f"[digestor_riesgo] PAUSA por calendario: {calendario['razon_pausa']}")
+        from agente_financiero.alertas_telegram import enviar_mensaje
+        enviar_mensaje(f"⏸️ Trading pausado\n{calendario['razon_pausa']}")
+        return {
+            "timestamp":         timestamp,
+            "operar":            False,
+            "razon":             calendario["razon_pausa"],
+            "señales_aprobadas": [],
+            "señales_rechazadas": señales,
+        }
+    if calendario.get("alerta"):
+        print(f"[digestor_riesgo] ALERTA calendario: {calendario['alerta']}")
 
     # 2. Filtrar por tendencia mayor
     filtro = filtrar_señal_por_tendencia(señal)
