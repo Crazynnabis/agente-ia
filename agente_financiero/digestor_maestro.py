@@ -11,6 +11,8 @@ from agente_financiero.digestor_riesgo import ejecutar_digestor_riesgo
 from agente_financiero.horario_trading import debe_operar
 from agente_financiero.backtesting import backtest_rapido
 from agente_financiero.logger_trading import log_ciclo, obtener_estadisticas_dia
+from agente_financiero.agente_orb import ejecutar_analisis_orb
+from agente_financiero.agente_petroleo import analizar_petroleo_completo
 
 ACTIVOS = ["BTCUSDT", "ETHUSDT", "SOLUSDT", "BNBUSDT"]
 
@@ -35,11 +37,18 @@ async def ejecutar_ciclo_maestro() -> dict:
     print(f"[MAESTRO] Horario: {horario.get('razon','N/A')} | Score: {horario.get('score','N/A')}/10")
 
     # Ejecuta ambos ciclos en paralelo
-    print("\n[MAESTRO] Ejecutando ciclos técnico y avanzado en paralelo...")
-    ciclo_basico, ciclo_avanzado = await asyncio.gather(
+    print("\n[MAESTRO] Ejecutando todos los ciclos en paralelo...")
+    ciclo_basico, ciclo_avanzado, orb_resultados, petroleo_resultado = await asyncio.gather(
         ejecutar_ciclo_tecnico(),
         ejecutar_ciclo_avanzado(),
+        asyncio.to_thread(ejecutar_analisis_orb),
+        analizar_petroleo_completo(),
     )
+
+    # Senales ORB fuertes
+    orb_senales = [r for r in orb_resultados if r.get("señal") != "ESPERAR"]
+    print(f"[MAESTRO] ORB senales: {len(orb_senales)}")
+    print(f"[MAESTRO] Petroleo analizado correctamente")
 
     # Consolida señales de ambos ciclos por simbolo
     tabla_maestra = []
