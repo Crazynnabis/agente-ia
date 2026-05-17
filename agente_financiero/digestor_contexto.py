@@ -11,20 +11,47 @@ from agente_financiero.agente_fundamental import analizar_fundamental_completo
 from agente_financiero.agente_historico import analizar_historico_completo
 from agente_financiero.agente_petroleo import analizar_petroleo_completo
 from agente_financiero.agente_google_trends import ejecutar_google_trends
+from agente_financiero.agente_estacionalidad import analizar_estacionalidad_completo
+from agente_financiero.agente_opciones import analizar_opciones_completo
 
 async def ejecutar_ciclo_contexto() -> dict:
     timestamp = datetime.now().strftime("%H:%M:%S")
     print(f"\n[digestor_contexto] Ciclo contexto {timestamp}")
 
-    print("[1/6] Sentimiento, macro, fundamental, historico, petroleo, trends en paralelo...")
-    sent_res, macro_res, fund_res, hist_res, petro_res, trends_res = await asyncio.gather(
+    print("[1/8] Todos los contextos en paralelo...")
+    sent_res, macro_res, fund_res, hist_res, petro_res, trends_res, estac_res, opciones_res = await asyncio.gather(
         analizar_sentimiento_mercado(),
         analizar_contexto_macro(),
         analizar_fundamental_completo(),
         analizar_historico_completo(),
         analizar_petroleo_completo(),
         asyncio.to_thread(ejecutar_google_trends),
+        asyncio.to_thread(analizar_estacionalidad_completo),
+        asyncio.to_thread(analizar_opciones_completo),
     )
+
+    # Extrae datos de estacionalidad y opciones
+    estac_señal   = estac_res.get("señal_estacional", "NEUTRAL")
+    estac_conf    = estac_res.get("confianza", 50)
+    estac_fase    = estac_res.get("ciclo_halving", {}).get("fase", "N/A")
+    opciones_btc  = next((o for o in opciones_res if o.get("moneda") == "BTC"), {})
+    pcr_btc       = opciones_btc.get("pcr_volumen", 1.0)
+    maxpain_btc   = opciones_btc.get("max_pain", "N/A")
+    opciones_señal= opciones_btc.get("señal", "ESPERAR")
+
+    print(f"[digestor_contexto] Estacionalidad: {estac_señal} ({estac_conf}%) — {estac_fase}")
+    print(f"[digestor_contexto] Opciones BTC PCR={pcr_btc} MaxPain=${maxpain_btc} señal={opciones_señal}")
+
+    # Ajusta puntos con estacionalidad y opciones
+    if "BAJISTA" in estac_señal:
+        puntos_bajista += 2
+    elif "ALCISTA" in estac_señal:
+        puntos_alcista += 2
+
+    if opciones_señal == "COMPRAR":
+        puntos_alcista += 1
+    elif opciones_señal == "VENDER":
+        puntos_bajista += 1
 
     # Señales de Google Trends
     trends_señales = [t for t in trends_res if t.get("señal") not in ["ESPERAR", None]]
@@ -85,23 +112,30 @@ async def ejecutar_ciclo_contexto() -> dict:
     contexto_completo = f"""
 SENTIMIENTO DE MERCADO:
 Fear & Greed: {fg_valor} ({fg_clasif}) — tendencia {fg_tendencia}
-{sent_analisis[:500]}
+{sent_analisis[:400]}
 
 CONTEXTO MACRO:
-{macro_analisis[:500]}
+{macro_analisis[:400]}
 
 FUNDAMENTAL:
-{fund_analisis[:400]}
+{fund_analisis[:300]}
 
 HISTORICO:
-{hist_analisis[:400]}
+{hist_analisis[:300]}
 
 PETROLEO:
 WTI=${wti_precio} ({wti_cambio}% hoy)
-{petro_analisis[:400]}
+{petro_analisis[:300]}
 
 GOOGLE TRENDS:
 {trends_resumen}
+
+ESTACIONALIDAD:
+{estac_señal} ({estac_conf}%) — Fase halving: {estac_fase}
+{estac_res.get('razon_mes','')} | {estac_res.get('razon_halving','')}
+
+OPCIONES (Put/Call Ratio):
+BTC PCR={pcr_btc} | MaxPain=${maxpain_btc} | Señal={opciones_señal}
 """
 
     print("[digestor_contexto] Generando analisis consolidado con IA...")
