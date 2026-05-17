@@ -58,6 +58,15 @@ async def procesar_señal(señal: dict) -> dict:
     resultado["aprobada_final"] = len(resultado["razones_rechazo"]) == 0
 
     # Registrar en logger
+    # Construye lista de fuentes que confirmaron la señal
+    fuentes_confirmacion = []
+    if señal.get("señal_basico")    != "ESPERAR": fuentes_confirmacion.append("tecnico")
+    if señal.get("señal_avanzado")  != "ESPERAR": fuentes_confirmacion.append("avanzado")
+    if señal.get("señal_estrategia")!= "ESPERAR": fuentes_confirmacion.append("estrategias")
+    if señal.get("sesgo_contexto")  != "NEUTRAL":  fuentes_confirmacion.append("contexto")
+    if not fuentes_confirmacion:
+        fuentes_confirmacion = ["tecnico"]
+
     log_señal(
         simbolo=simbolo,
         accion=accion,
@@ -66,7 +75,7 @@ async def procesar_señal(señal: dict) -> dict:
         tp1=tp1,
         tp2=tp2,
         confianza=señal.get("confianza_final", 0),
-        fuentes=["velas", "indicadores", "orderflow", "niveles", "onchain"],
+        fuentes=fuentes_confirmacion,
         razon=señal.get("razon", ""),
         horizonte=señal.get("horizonte", "15min"),
         aprobada_riesgo=validacion["aprobada"],
@@ -76,7 +85,7 @@ async def procesar_señal(señal: dict) -> dict:
 
     return resultado
 
-async def ejecutar_digestor_riesgo(señales: list) -> dict:
+async def ejecutar_digestor_riesgo(señales: list, sesgo_contexto: str = "NEUTRAL") -> dict:
     timestamp = datetime.now().strftime("%H:%M:%S")
     print(f"\n[digestor_riesgo] Procesando {len(señales)} señales...")
 
@@ -100,6 +109,18 @@ async def ejecutar_digestor_riesgo(señales: list) -> dict:
             continue
 
         print(f"[digestor_riesgo] Procesando {señal.get('simbolo')}...")
+
+        # Filtro de contexto — evita operar contra el sesgo macro
+        accion = señal.get("señal_final", "ESPERAR")
+        if sesgo_contexto == "BAJISTA" and accion == "COMPRAR":
+            print(f"  RECHAZADA por contexto BAJISTA")
+            señales_rechazadas.append({"simbolo": señal.get("simbolo"), "razones_rechazo": ["Contexto macro BAJISTA — evitar compras"]})
+            continue
+        elif sesgo_contexto == "ALCISTA" and accion == "VENDER":
+            print(f"  RECHAZADA por contexto ALCISTA")
+            señales_rechazadas.append({"simbolo": señal.get("simbolo"), "razones_rechazo": ["Contexto macro ALCISTA — evitar ventas"]})
+            continue
+
         resultado = await procesar_señal(señal)
 
         if resultado["aprobada_final"]:
