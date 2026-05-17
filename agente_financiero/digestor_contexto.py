@@ -30,42 +30,11 @@ async def ejecutar_ciclo_contexto() -> dict:
         asyncio.to_thread(analizar_opciones_completo),
     )
 
-    # Extrae datos de estacionalidad y opciones
-    estac_señal   = estac_res.get("señal_estacional", "NEUTRAL")
-    estac_conf    = estac_res.get("confianza", 50)
-    estac_fase    = estac_res.get("ciclo_halving", {}).get("fase", "N/A")
-    opciones_btc  = next((o for o in opciones_res if o.get("moneda") == "BTC"), {})
-    pcr_btc       = opciones_btc.get("pcr_volumen", 1.0)
-    maxpain_btc   = opciones_btc.get("max_pain", "N/A")
-    opciones_señal= opciones_btc.get("señal", "ESPERAR")
-
-    print(f"[digestor_contexto] Estacionalidad: {estac_señal} ({estac_conf}%) — {estac_fase}")
-    print(f"[digestor_contexto] Opciones BTC PCR={pcr_btc} MaxPain=${maxpain_btc} señal={opciones_señal}")
-
-    # Ajusta puntos con estacionalidad y opciones
-    if "BAJISTA" in estac_señal:
-        puntos_bajista += 2
-    elif "ALCISTA" in estac_señal:
-        puntos_alcista += 2
-
-    if opciones_señal == "COMPRAR":
-        puntos_alcista += 1
-    elif opciones_señal == "VENDER":
-        puntos_bajista += 1
-
-    # Señales de Google Trends
-    trends_señales = [t for t in trends_res if t.get("señal") not in ["ESPERAR", None]]
-    trends_resumen = "\n".join([
-        f"{t['simbolo']}: {t['señal']} | valor={t['valor_actual']} vs prom={t['promedio_3m']} | {t['razon']}"
-        for t in trends_señales
-    ]) if trends_señales else "Sin señales de trends"
-    print(f"[digestor_contexto] Trends: {len(trends_señales)} señales")
-
     # Extrae señales clave de cada fuente
-    fear_greed    = sent_res.get("fear_greed", {})
-    fg_valor      = fear_greed.get("valor_hoy", 50)
-    fg_clasif     = fear_greed.get("clasificacion", "Neutral")
-    fg_tendencia  = fear_greed.get("tendencia", "neutral")
+    fear_greed   = sent_res.get("fear_greed", {})
+    fg_valor     = fear_greed.get("valor_hoy", 50)
+    fg_clasif    = fear_greed.get("clasificacion", "Neutral")
+    fg_tendencia = fear_greed.get("tendencia", "neutral")
 
     sent_analisis  = sent_res.get("analisis", "Sin datos")
     macro_analisis = macro_res.get("analisis", "Sin datos")
@@ -74,6 +43,26 @@ async def ejecutar_ciclo_contexto() -> dict:
     petro_analisis = petro_res.get("analisis", "Sin datos")
     wti_precio     = petro_res.get("precios", {}).get("WTI", {}).get("precio", "N/A")
     wti_cambio     = petro_res.get("precios", {}).get("WTI", {}).get("cambio_dia", 0)
+
+    # Extrae datos de estacionalidad y opciones
+    estac_señal   = estac_res.get("señal_estacional", "NEUTRAL")
+    estac_conf    = estac_res.get("confianza", 50)
+    estac_fase    = estac_res.get("ciclo_halving", {}).get("fase", "N/A")
+    opciones_btc  = next((o for o in opciones_res if o.get("moneda") == "BTC"), {})
+    pcr_btc       = opciones_btc.get("pcr_volumen", 1.0)
+    maxpain_btc   = opciones_btc.get("max_pain", "N/A")
+    opciones_señal = opciones_btc.get("señal", "ESPERAR")
+
+    print(f"[digestor_contexto] Estacionalidad: {estac_señal} ({estac_conf}%) — {estac_fase}")
+    print(f"[digestor_contexto] Opciones BTC PCR={pcr_btc} MaxPain=${maxpain_btc} señal={opciones_señal}")
+
+    # Señales de Google Trends
+    trends_señales = [t for t in trends_res if t.get("señal") not in ["ESPERAR", None]]
+    trends_resumen = "\n".join([
+        f"{t['simbolo']}: {t['señal']} | valor={t['valor_actual']} vs prom={t['promedio_3m']} | {t['razon']}"
+        for t in trends_señales
+    ]) if trends_señales else "Sin señales de trends"
+    print(f"[digestor_contexto] Trends: {len(trends_señales)} señales")
 
     # Determina sesgo de contexto
     puntos_alcista = 0
@@ -94,21 +83,31 @@ async def ejecutar_ciclo_contexto() -> dict:
         puntos_bajista += 1
 
     if wti_cambio > 2:
-        puntos_bajista += 1  # petroleo caro presiona mercados
+        puntos_bajista += 1
     elif wti_cambio < -2:
-        puntos_alcista += 1  # petroleo barato favorece economia
+        puntos_alcista += 1
+
+    # Ajusta puntos con estacionalidad y opciones
+    if "BAJISTA" in estac_señal:
+        puntos_bajista += 2
+    elif "ALCISTA" in estac_señal:
+        puntos_alcista += 2
+
+    if opciones_señal == "COMPRAR":
+        puntos_alcista += 1
+    elif opciones_señal == "VENDER":
+        puntos_bajista += 1
 
     if puntos_alcista > puntos_bajista:
-        sesgo_contexto = "ALCISTA"
+        sesgo_contexto     = "ALCISTA"
         confianza_contexto = min(50 + puntos_alcista * 10, 85)
     elif puntos_bajista > puntos_alcista:
-        sesgo_contexto = "BAJISTA"
+        sesgo_contexto     = "BAJISTA"
         confianza_contexto = min(50 + puntos_bajista * 10, 85)
     else:
-        sesgo_contexto = "NEUTRAL"
+        sesgo_contexto     = "NEUTRAL"
         confianza_contexto = 50
 
-    # Resumen consolidado para IA
     contexto_completo = f"""
 SENTIMIENTO DE MERCADO:
 Fear & Greed: {fg_valor} ({fg_clasif}) — tendencia {fg_tendencia}
@@ -141,7 +140,7 @@ BTC PCR={pcr_btc} | MaxPain=${maxpain_btc} | Señal={opciones_señal}
     print("[digestor_contexto] Generando analisis consolidado con IA...")
     respuesta = await chat(
         mensajes=[{"role": "user", "content": f"Consolida este contexto de mercado:\n{contexto_completo}"}],
-        system="""Eres el digestor de contexto de mercado. Recibes datos de sentimiento, macro, fundamental, historico y petroleo.
+        system="""Eres el digestor de contexto de mercado. Recibes datos de sentimiento, macro, fundamental, historico, petroleo, trends, estacionalidad y opciones.
 Entrega un reporte ejecutivo con:
 1. Sesgo general del mercado (alcista/bajista/neutral) con nivel de confianza
 2. Factores macro mas importantes ahora mismo
@@ -153,14 +152,17 @@ Responde en español, conciso y accionable. Maximo 300 palabras.""",
     )
 
     return {
-        "timestamp":          timestamp,
-        "fear_greed":         fear_greed,
-        "sesgo_contexto":     sesgo_contexto,
-        "confianza_contexto": confianza_contexto,
-        "wti_precio":         wti_precio,
-        "wti_cambio":         wti_cambio,
+        "timestamp":            timestamp,
+        "fear_greed":           fear_greed,
+        "sesgo_contexto":       sesgo_contexto,
+        "confianza_contexto":   confianza_contexto,
+        "wti_precio":           wti_precio,
+        "wti_cambio":           wti_cambio,
+        "estac_señal":          estac_señal,
+        "pcr_btc":              pcr_btc,
+        "maxpain_btc":          maxpain_btc,
         "analisis_consolidado": respuesta["texto"],
-        "modelo":             respuesta["modelo"],
+        "modelo":               respuesta["modelo"],
         "fuentes": {
             "sentimiento":  sent_analisis[:200],
             "macro":        macro_analisis[:200],
