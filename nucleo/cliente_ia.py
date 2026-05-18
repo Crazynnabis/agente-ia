@@ -2,7 +2,7 @@ import os
 from dotenv import load_dotenv
 load_dotenv()
 
-MODELO_CLAUDE = "claude-haiku-4-5"
+MODELO_CLAUDE = MODELO_CLAUDE = os.getenv("ANTHROPIC_MODEL", "claude-haiku-4-5-20251001")
 MODELO_OLLAMA = "qwen2.5-coder:7b"
 
 async def chat(mensajes: list, system: str = "", max_tokens: int = 1000) -> dict:
