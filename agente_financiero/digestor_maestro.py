@@ -13,7 +13,7 @@ from agente_financiero.digestor_riesgo import ejecutar_digestor_riesgo
 from agente_financiero.horario_trading import debe_operar
 from agente_financiero.logger_trading import log_ciclo, obtener_estadisticas_dia
 
-ACTIVOS = ["BTCUSDT", "ETHUSDT", "SOLUSDT", "BNBUSDT"]
+ACTIVOS = ["BTCUSDT", "ETHUSDT", "SOLUSDT", "BNBUSDT", "AAPL", "NVDA", "MSFT", "TSLA", "SPY", "QQQ"]
 
 async def ejecutar_ciclo_maestro() -> dict:
     inicio    = datetime.now()

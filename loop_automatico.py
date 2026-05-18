@@ -14,6 +14,7 @@ from datetime import datetime
 from agente_financiero.digestor_maestro import ejecutar_ciclo_maestro
 from agente_financiero.alertas_telegram import enviar_mensaje, alerta_resumen_dia
 from agente_financiero.logger_trading import obtener_estadisticas_dia
+from supabase import create_client
 
 INTERVALO_MINUTOS = 15
 MAX_CICLOS        = 0
@@ -76,6 +77,15 @@ async def loop_principal():
         except Exception as e:
             print(f"[loop] Error ciclo #{ciclo}: {e}")
             enviar_mensaje(f"⚠️ Error ciclo #{ciclo}: {str(e)[:100]}")
+
+        # Ping a Supabase cada 5 dias para evitar pausa
+        if ciclo % 480 == 0:
+            try:
+                sb = create_client(os.getenv("SUPABASE_URL"), os.getenv("SUPABASE_KEY"))
+                sb.table("señales_trading").select("id").limit(1).execute()
+                print("[loop] Ping Supabase OK")
+            except Exception as e:
+                print(f"[loop] Ping Supabase error: {e}")
 
         print(f"\n[loop] Esperando {INTERVALO_MINUTOS} minutos...")
         await asyncio.sleep(INTERVALO_MINUTOS * 60)
