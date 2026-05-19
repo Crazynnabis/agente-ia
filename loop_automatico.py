@@ -1,4 +1,4 @@
-# loop_automatico.py — Loop dual integrado 2min + 15min
+# loop_automatico.py — Loop dual integrado con comandos Telegram
 import os
 import sys
 import asyncio
@@ -20,6 +20,7 @@ from agente_financiero.agente_indicadores import analizar_indicadores_completo
 from agente_financiero.agente_orderflow import analizar_todos_activos
 from agente_financiero.gestion_riesgo import GestorRiesgo
 from agente_financiero.ejecutor_alpaca import ejecutar_orden, obtener_posiciones
+from agente_financiero.telegram_comandos import escuchar_comandos
 
 INTERVALO_MINUTOS = 15
 MAX_CICLOS        = 0
@@ -38,9 +39,9 @@ async def ciclo_rapido_integrado():
         )
 
         for ind in ind_res:
-            simbolo   = ind["simbolo"]
-            señal_ind = ind["señal"]
-            confianza = ind["confianza"]
+            simbolo    = ind["simbolo"]
+            señal_ind  = ind["señal"]
+            confianza  = ind["confianza"]
 
             vela_op    = next((o for o in velas_res["oportunidades"] if simbolo in o["simbolo"]), None)
             of         = next((o for o in of_res if o.get("simbolo") == simbolo), {})
@@ -167,5 +168,11 @@ async def loop_principal():
             print(f"[rapido] Ciclo rapido {i+1}/{INTERVALO_MINUTOS // 2} — {datetime.now().strftime('%H:%M:%S')}")
             await ciclo_rapido_integrado()
 
+async def main():
+    await asyncio.gather(
+        loop_principal(),
+        escuchar_comandos(),
+    )
+
 if __name__ == "__main__":
-    asyncio.run(loop_principal())
+    asyncio.run(main())
