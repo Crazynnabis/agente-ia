@@ -7,10 +7,10 @@ from datetime import datetime
 from supabase import create_client
 from dotenv import load_dotenv
 
-load_dotenv()
+load_dotenv(r'C:\Users\Oscar Hernandez\.env', override=True)
+load_dotenv(override=False)
 
-# Log local como respaldo
-LOG_DIR = os.path.join(os.path.dirname(__file__), '..', 'logs')
+LOG_DIR  = os.path.join(os.path.dirname(__file__), '..', 'logs')
 os.makedirs(LOG_DIR, exist_ok=True)
 LOG_FILE = os.path.join(LOG_DIR, f"trading_{datetime.now().strftime('%Y%m%d')}.jsonl")
 
@@ -30,37 +30,39 @@ def log_señal(simbolo: str, accion: str, precio: float, sl: float,
               tamaño_posicion: dict = None) -> dict:
 
     registro = {
-        "timestamp":           datetime.now().isoformat(),
-        "tipo":                "SEÑAL",
-        "simbolo":             simbolo,
-        "accion":              accion,
-        "precio":              precio,
-        "stop_loss":           sl,
-        "take_profit_1":       tp1,
-        "take_profit_2":       tp2,
-        "confianza":           confianza,
-        "fuentes":             fuentes if isinstance(fuentes, str) else ",".join(fuentes),
-        "razon":               razon,
-        "horizonte":           horizonte,
-        "aprobada_riesgo":     aprobada_riesgo,
-        "aprobada_tendencia":  aprobada_tendencia,
-        "cantidad":            tamaño_posicion.get("cantidad", 0) if tamaño_posicion else 0,
-        "valor_posicion_usd":  tamaño_posicion.get("valor_posicion_usd", 0) if tamaño_posicion else 0,
-        "riesgo_usd":          tamaño_posicion.get("riesgo_usd", 0) if tamaño_posicion else 0,
+        "timestamp":          datetime.now().isoformat(),
+        "tipo":               "SEÑAL",
+        "simbolo":            simbolo,
+        "accion":             accion,
+        "precio":             precio,
+        "stop_loss":          sl,
+        "take_profit_1":      tp1,
+        "take_profit_2":      tp2,
+        "confianza":          confianza,
+        "fuentes":            fuentes if isinstance(fuentes, str) else ",".join(fuentes),
+        "razon":              razon,
+        "horizonte":          horizonte,
+        "aprobada_riesgo":    aprobada_riesgo,
+        "aprobada_tendencia": aprobada_tendencia,
+        "cantidad":           tamaño_posicion.get("cantidad", 0) if tamaño_posicion else 0,
+        "valor_posicion_usd": tamaño_posicion.get("valor_posicion_usd", 0) if tamaño_posicion else 0,
+        "riesgo_usd":         tamaño_posicion.get("riesgo_usd", 0) if tamaño_posicion else 0,
     }
 
-    # Guarda en archivo local
-    with open(LOG_FILE, "a", encoding="utf-8") as f:
-        f.write(json.dumps(registro) + "\n")
+    try:
+        with open(LOG_FILE, "a", encoding="utf-8") as f:
+            f.write(json.dumps(registro) + "\n")
+    except Exception as e:
+        print(f"[logger] Error archivo local: {e}")
 
-    # Guarda en Supabase
     try:
         sb = obtener_supabase()
         if sb:
             sb.table("señales_trading").insert(registro).execute()
     except Exception as e:
-        print(f"[logger] Error Supabase: {e}")
+        print(f"[logger] Error Supabase señal: {e}")
 
+    aprobada = "APROBADA" if aprobada_riesgo and aprobada_tendencia else "RECHAZADA"
     print(f"[logger] Señal registrada: {accion} {simbolo} @ {precio} | confianza={confianza}%")
     return registro
 
@@ -68,18 +70,21 @@ def log_orden(simbolo: str, accion: str, precio: float,
               cantidad: float, orden_id: str, estado: str) -> dict:
 
     registro = {
-        "timestamp":  datetime.now().isoformat(),
-        "tipo":       "ORDEN",
-        "simbolo":    simbolo,
-        "accion":     accion,
-        "precio":     precio,
-        "cantidad":   cantidad,
-        "orden_id":   orden_id,
-        "estado":     estado,
+        "timestamp": datetime.now().isoformat(),
+        "tipo":      "ORDEN",
+        "simbolo":   simbolo,
+        "accion":    accion,
+        "precio":    precio,
+        "cantidad":  cantidad,
+        "orden_id":  orden_id,
+        "estado":    estado,
     }
 
-    with open(LOG_FILE, "a", encoding="utf-8") as f:
-        f.write(json.dumps(registro) + "\n")
+    try:
+        with open(LOG_FILE, "a", encoding="utf-8") as f:
+            f.write(json.dumps(registro) + "\n")
+    except:
+        pass
 
     try:
         sb = obtener_supabase()
@@ -94,7 +99,7 @@ def log_orden(simbolo: str, accion: str, precio: float,
 def log_cierre(simbolo: str, precio_entrada: float, precio_cierre: float,
                cantidad: float, pnl_usd: float, razon_cierre: str) -> dict:
 
-    pnl_pct = round(((precio_cierre - precio_entrada) / precio_entrada) * 100, 3)
+    pnl_pct = round(((precio_cierre - precio_entrada) / precio_entrada) * 100, 3) if precio_entrada > 0 else 0
 
     registro = {
         "timestamp":      datetime.now().isoformat(),
@@ -109,8 +114,11 @@ def log_cierre(simbolo: str, precio_entrada: float, precio_cierre: float,
         "resultado":      "GANANCIA" if pnl_usd > 0 else "PERDIDA",
     }
 
-    with open(LOG_FILE, "a", encoding="utf-8") as f:
-        f.write(json.dumps(registro) + "\n")
+    try:
+        with open(LOG_FILE, "a", encoding="utf-8") as f:
+            f.write(json.dumps(registro) + "\n")
+    except:
+        pass
 
     try:
         sb = obtener_supabase()
@@ -137,19 +145,27 @@ def log_ciclo(ciclo_num: int, señales_detectadas: int,
         "modelo_usado":       modelo_usado,
     }
 
-    with open(LOG_FILE, "a", encoding="utf-8") as f:
-        f.write(json.dumps(registro) + "\n")
+    try:
+        with open(LOG_FILE, "a", encoding="utf-8") as f:
+            f.write(json.dumps(registro) + "\n")
+    except:
+        pass
 
     print(f"[logger] Ciclo {ciclo_num}: {señales_detectadas} señales | {ordenes_ejecutadas} ordenes | {round(duracion_segundos,1)}s")
     return registro
 
 def obtener_estadisticas_dia() -> dict:
     if not os.path.exists(LOG_FILE):
-        return {"error": "Sin logs hoy"}
+        return {
+            "fecha": datetime.now().strftime("%Y-%m-%d"),
+            "total_señales": 0, "total_ordenes": 0, "total_cierres": 0,
+            "ganancias": 0, "perdidas": 0, "win_rate": 0,
+            "pnl_total_usd": 0, "ganancia_promedio": 0, "perdida_promedio": 0,
+        }
 
-    señales  = []
-    ordenes  = []
-    cierres  = []
+    señales = []
+    ordenes = []
+    cierres = []
 
     with open(LOG_FILE, "r", encoding="utf-8") as f:
         for linea in f:
@@ -167,14 +183,14 @@ def obtener_estadisticas_dia() -> dict:
     win_rate  = len(ganancias) / len(cierres) * 100 if cierres else 0
 
     return {
-        "fecha":              datetime.now().strftime("%Y-%m-%d"),
-        "total_señales":      len(señales),
-        "total_ordenes":      len(ordenes),
-        "total_cierres":      len(cierres),
-        "ganancias":          len(ganancias),
-        "perdidas":           len(perdidas),
-        "win_rate":           round(win_rate, 1),
-        "pnl_total_usd":      round(pnl_total, 2),
-        "ganancia_promedio":  round(sum(ganancias)/len(ganancias), 2) if ganancias else 0,
-        "perdida_promedio":   round(sum(perdidas)/len(perdidas), 2) if perdidas else 0,
+        "fecha":             datetime.now().strftime("%Y-%m-%d"),
+        "total_señales":     len(señales),
+        "total_ordenes":     len(ordenes),
+        "total_cierres":     len(cierres),
+        "ganancias":         len(ganancias),
+        "perdidas":          len(perdidas),
+        "win_rate":          round(win_rate, 1),
+        "pnl_total_usd":     round(pnl_total, 2),
+        "ganancia_promedio": round(sum(ganancias)/len(ganancias), 2) if ganancias else 0,
+        "perdida_promedio":  round(sum(perdidas)/len(perdidas), 2) if perdidas else 0,
     }

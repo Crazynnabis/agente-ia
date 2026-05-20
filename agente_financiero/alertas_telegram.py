@@ -4,9 +4,11 @@ import os
 from datetime import datetime
 from dotenv import load_dotenv
 
-load_dotenv()
+# Carga .env tanto en PC como en Railway
+load_dotenv(r'C:\Users\Oscar Hernandez\.env', override=True)
+load_dotenv(override=False)  # Fallback para Railway
 
-TELEGRAM_TOKEN  = os.getenv("TELEGRAM_TOKEN", "")
+TELEGRAM_TOKEN   = os.getenv("TELEGRAM_TOKEN", "")
 TELEGRAM_CHAT_ID = os.getenv("TELEGRAM_CHAT_ID", "")
 
 def enviar_mensaje(texto: str) -> bool:
@@ -15,7 +17,7 @@ def enviar_mensaje(texto: str) -> bool:
         return False
     try:
         url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage"
-        r = requests.post(url, json={
+        r   = requests.post(url, json={
             "chat_id":    TELEGRAM_CHAT_ID,
             "text":       texto,
             "parse_mode": "HTML",
@@ -28,9 +30,9 @@ def enviar_mensaje(texto: str) -> bool:
 def alerta_señal(simbolo: str, accion: str, precio: float,
                  sl: float, tp1: float, confianza: float,
                  razon: str, horizonte: str) -> bool:
-    emoji = "🟢" if accion == "COMPRAR" else "🔴"
-    dist_sl  = round(abs(precio - sl) / precio * 100, 2)
-    dist_tp1 = round(abs(tp1 - precio) / precio * 100, 2)
+    emoji    = "🟢" if accion == "COMPRAR" else "🔴"
+    dist_sl  = round(abs(precio - sl)  / precio * 100, 2) if precio > 0 else 0
+    dist_tp1 = round(abs(tp1 - precio) / precio * 100, 2) if precio > 0 else 0
     ratio    = round(dist_tp1 / dist_sl, 1) if dist_sl > 0 else 0
 
     texto = f"""{emoji} <b>SEÑAL DE TRADING</b>
@@ -76,7 +78,7 @@ def alerta_cierre(simbolo: str, precio_entrada: float,
     return enviar_mensaje(texto)
 
 def alerta_resumen_dia(stats: dict) -> bool:
-    pnl = stats.get("pnl_total_usd", 0)
+    pnl   = stats.get("pnl_total_usd", 0)
     emoji = "📈" if pnl >= 0 else "📉"
     texto = f"""{emoji} <b>RESUMEN DEL DIA</b>
 ━━━━━━━━━━━━━━━━━━
