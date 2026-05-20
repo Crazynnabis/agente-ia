@@ -12,8 +12,9 @@ sys.path.insert(0, r'C:\Users\Oscar Hernandez\agente-ia')
 from datetime import datetime
 from supabase import create_client
 from agente_financiero.digestor_maestro import ejecutar_ciclo_maestro
+from agente_financiero.digestor_acciones import ejecutar_ciclo_acciones, es_horario_mercado
 from agente_financiero.alertas_telegram import enviar_mensaje, alerta_resumen_dia, alerta_señal
-from agente_financiero.logger_trading import obtener_estadisticas_dia, log_señal
+from agente_financiero.logger_trading import obtener_estadisticas_dia
 from agente_financiero.horario_trading import debe_operar
 from agente_financiero.agente_velas import analizar_oportunidades
 from agente_financiero.agente_indicadores import analizar_indicadores_completo
@@ -39,14 +40,14 @@ async def ciclo_rapido_integrado():
         )
 
         for ind in ind_res:
-            simbolo    = ind["simbolo"]
-            señal_ind  = ind["señal"]
-            confianza  = ind["confianza"]
+            simbolo     = ind["simbolo"]
+            señal_ind   = ind["señal"]
+            confianza   = ind["confianza"]
 
-            vela_op    = next((o for o in velas_res["oportunidades"] if simbolo in o["simbolo"]), None)
-            of         = next((o for o in of_res if o.get("simbolo") == simbolo), {})
-            señal_of   = "COMPRAR" if "COMPRADORA" in of.get("señal","") else (
-                         "VENDER"  if "VENDEDORA"  in of.get("señal","") else "NEUTRAL")
+            vela_op     = next((o for o in velas_res["oportunidades"] if simbolo in o["simbolo"]), None)
+            of          = next((o for o in of_res if o.get("simbolo") == simbolo), {})
+            señal_of    = "COMPRAR" if "COMPRADORA" in of.get("señal","") else (
+                          "VENDER"  if "VENDEDORA"  in of.get("señal","") else "NEUTRAL")
             señal_velas = "COMPRAR" if vela_op else "NEUTRAL"
 
             if señal_velas == señal_ind == señal_of and señal_ind != "ESPERAR" and confianza >= 80:
@@ -56,13 +57,13 @@ async def ciclo_rapido_integrado():
                     continue
 
                 señal_data = {
-                    "simbolo":        simbolo,
-                    "señal_final":    señal_ind,
-                    "precio":         ind["precio"],
-                    "stop_loss":      ind["atr"]["stop_loss_largo"],
-                    "take_profit_1":  ind["atr"]["take_profit_1r"],
-                    "take_profit_2":  ind["atr"]["take_profit_2r"],
-                    "confianza_final":min(confianza + 20, 99),
+                    "simbolo":         simbolo,
+                    "señal_final":     señal_ind,
+                    "precio":          ind["precio"],
+                    "stop_loss":       ind["atr"]["stop_loss_largo"],
+                    "take_profit_1":   ind["atr"]["take_profit_1r"],
+                    "take_profit_2":   ind["atr"]["take_profit_2r"],
+                    "confianza_final": min(confianza + 20, 99),
                 }
                 validacion = gestor_rapido.validar_señal(señal_data)
                 if not validacion["aprobada"]:
@@ -117,6 +118,7 @@ async def loop_principal():
         print(f"{'='*60}")
 
         try:
+            # Ciclo maestro crypto
             resultado = await ejecutar_ciclo_maestro()
 
             if not resultado.get("operar", True):
@@ -141,6 +143,24 @@ async def loop_principal():
                     stats = obtener_estadisticas_dia()
                     alerta_resumen_dia(stats)
 
+            # Ciclo acciones — solo cuando NYSE esta abierto
+            if es_horario_mercado():
+                print(f"[loop] NYSE abierto — analizando acciones USA...")
+                try:
+                    resultado_acc = await ejecutar_ciclo_acciones()
+                    señales_acc   = resultado_acc.get("señales_fuertes", [])
+                    print(f"[loop] Acciones: {len(señales_acc)} señales fuertes")
+                    if señales_acc:
+                        texto_acc = "📈 <b>SEÑALES ACCIONES USA</b>\n" + "\n".join([
+                            f"{s['simbolo']}: {s['señal_final']} | conf={s['confianza']}% | ${s['precio']}"
+                            for s in señales_acc
+                        ])
+                        enviar_mensaje(texto_acc)
+                except Exception as e:
+                    print(f"[loop] Error ciclo acciones: {e}")
+            else:
+                print(f"[loop] NYSE cerrado — omitiendo acciones")
+
             if MAX_CICLOS > 0 and ciclo >= MAX_CICLOS:
                 break
 
@@ -152,7 +172,7 @@ async def loop_principal():
             print(f"[loop] Error ciclo #{ciclo}: {e}")
             enviar_mensaje(f"⚠️ Error ciclo #{ciclo}: {str(e)[:100]}")
 
-        # Ping a Supabase cada 5 dias
+        # Ping Supabase cada 5 dias
         if ciclo % 480 == 0:
             try:
                 sb = create_client(os.getenv("SUPABASE_URL"), os.getenv("SUPABASE_KEY"))
@@ -161,7 +181,7 @@ async def loop_principal():
             except Exception as e:
                 print(f"[loop] Ping Supabase error: {e}")
 
-        # Ciclos rapidos cada 2 minutos mientras espera el ciclo completo
+        # Ciclos rapidos cada 2 minutos
         print(f"\n[loop] Iniciando {INTERVALO_MINUTOS // 2} ciclos rapidos de 2 minutos...")
         for i in range(INTERVALO_MINUTOS // 2):
             await asyncio.sleep(2 * 60)
