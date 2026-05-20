@@ -1,8 +1,11 @@
+# nucleo/cliente_ia.py
 import os
 from dotenv import load_dotenv
-load_dotenv()
 
-MODELO_CLAUDE = MODELO_CLAUDE = os.getenv("ANTHROPIC_MODEL", "claude-haiku-4-5-20251001")
+load_dotenv(r'C:\Users\Oscar Hernandez\.env', override=True)
+load_dotenv(override=False)
+
+MODELO_CLAUDE = os.getenv("ANTHROPIC_MODEL", "claude-haiku-4-5-20251001")
 MODELO_OLLAMA = "qwen2.5-coder:7b"
 
 async def chat(mensajes: list, system: str = "", max_tokens: int = 1000) -> dict:
@@ -10,7 +13,7 @@ async def chat(mensajes: list, system: str = "", max_tokens: int = 1000) -> dict
     try:
         import anthropic
         api_key = os.getenv("ANTHROPIC_API_KEY", "")
-        if api_key and not api_key.startswith("sk-ant-api03-REEMPLAZA"):
+        if api_key and len(api_key) > 20:
             cliente  = anthropic.AsyncAnthropic(api_key=api_key)
             kwargs   = {"model": MODELO_CLAUDE, "max_tokens": max_tokens, "messages": mensajes}
             if system:
@@ -32,10 +35,10 @@ async def chat(mensajes: list, system: str = "", max_tokens: int = 1000) -> dict
     except Exception as e:
         print(f"[cliente_ia] Ollama no disponible: {e}")
 
-    # Fallback final: respuesta estructurada sin IA
+    # Fallback final
     print(f"[cliente_ia] Usando respuesta por defecto sin IA")
     return {
-        "texto":   "SISTEMA_EN_ESPERA — Sin IA disponible, usando datos numericos directamente",
-        "modelo":  "fallback",
-        "fuente":  "fallback"
+        "texto":  "SISTEMA_EN_ESPERA — Sin IA disponible, usando datos numericos directamente",
+        "modelo": "fallback",
+        "fuente": "fallback"
     }
