@@ -2,28 +2,27 @@
 from datetime import datetime, time
 import pytz
 
-# Configuracion de riesgo
 CONFIG = {
-    "capital_total":          100000.0,  # capital paper trading Alpaca
-    "riesgo_por_operacion":   0.01,      # 1% maximo por operacion
-    "max_operaciones":        2,          # maximo simultaneas
-    "max_perdida_diaria":     0.03,       # 3% perdida maxima del dia
-    "ratio_minimo_rb":        2.0,        # ratio riesgo/beneficio minimo
-    "confianza_minima":       70,         # confianza minima para operar
+    "capital_total":          100000.0,
+    "riesgo_por_operacion":   0.01,
+    "max_operaciones":        2,
+    "max_perdida_diaria":     0.03,
+    "ratio_minimo_rb":        2.0,
+    "confianza_minima":       80,        # Subido de 70 a 80
     "horarios_optimos": [
-        (8,  12),  # 8am - 12pm UTC
-        (14, 18),  # 2pm - 6pm UTC
+        (8,  12),
+        (14, 18),
     ],
     "zona_horaria": "UTC",
 }
 
 class GestorRiesgo:
     def __init__(self, config: dict = None):
-        self.config          = config or CONFIG
+        self.config               = config or CONFIG
         self.operaciones_abiertas = []
-        self.perdida_diaria  = 0.0
-        self.ganancia_diaria = 0.0
-        self.operaciones_hoy = []
+        self.perdida_diaria       = 0.0
+        self.ganancia_diaria      = 0.0
+        self.operaciones_hoy      = []
 
     def calcular_tamaño_posicion(self, precio: float, stop_loss: float) -> dict:
         try:
@@ -71,14 +70,12 @@ class GestorRiesgo:
         }
 
     def verificar_limites(self) -> dict:
-        # Limite de operaciones simultaneas
         if len(self.operaciones_abiertas) >= self.config["max_operaciones"]:
             return {
                 "permitido": False,
                 "razon":     f"Maximo {self.config['max_operaciones']} operaciones simultaneas alcanzado",
             }
 
-        # Limite de perdida diaria
         capital = self.config["capital_total"]
         if self.perdida_diaria >= capital * self.config["max_perdida_diaria"]:
             return {
@@ -89,18 +86,18 @@ class GestorRiesgo:
         return {"permitido": True}
 
     def validar_señal(self, señal: dict) -> dict:
-        errores   = []
-        warnings  = []
+        errores  = []
+        warnings = []
 
-        # Verifica confianza minima
+        # Verifica confianza minima — 80%
         confianza = señal.get("confianza_final", 0)
         if confianza < self.config["confianza_minima"]:
             errores.append(f"Confianza {confianza}% menor al minimo {self.config['confianza_minima']}%")
 
-        # Verifica ratio R/B
-        precio    = señal.get("precio", 0)
-        sl        = señal.get("stop_loss", 0)
-        tp1       = señal.get("take_profit_1", 0)
+        # Verifica ratio R/B minimo 2:1
+        precio = señal.get("precio", 0)
+        sl     = señal.get("stop_loss", 0)
+        tp1    = señal.get("take_profit_1", 0)
         if precio and sl and tp1:
             distancia_sl  = abs(precio - sl)
             distancia_tp1 = abs(tp1 - precio)
@@ -108,14 +105,15 @@ class GestorRiesgo:
             if ratio < self.config["ratio_minimo_rb"] - 0.1:
                 errores.append(f"Ratio R/B {round(ratio,2)}x menor al minimo {self.config['ratio_minimo_rb']}x")
 
-        # Verifica confluencia
-        if señal.get("confluencia") not in ["ALTA"]:
-            warnings.append(f"Confluencia {señal.get('confluencia')} — preferible ALTA")
+        # Verifica confluencia — acepta ALTA y MUY_ALTA
+        confluencia = señal.get("confluencia", "")
+        if confluencia not in ["ALTA", "MUY_ALTA"]:
+            warnings.append(f"Confluencia {confluencia} — preferible ALTA o MUY_ALTA")
 
         # Verifica horario
         horario = self.verificar_horario_optimo()
         if not horario["horario_optimo"]:
-            warnings.append(horario["mensaje"])
+            warnings.append(horario.get("mensaje", "Fuera de horario optimo"))
 
         # Verifica limites globales
         limites = self.verificar_limites()
@@ -125,30 +123,29 @@ class GestorRiesgo:
         # Calcula tamaño de posicion
         tamaño = self.calcular_tamaño_posicion(precio, sl) if precio and sl else {}
 
-        aprobada = len(errores) == 0
-
         return {
-            "aprobada":   aprobada,
-            "errores":    errores,
-            "warnings":   warnings,
-            "tamaño":     tamaño,
-            "horario":    horario,
+            "aprobada": len(errores) == 0,
+            "errores":  errores,
+            "warnings": warnings,
+            "tamaño":   tamaño,
+            "horario":  horario,
         }
 
-    def registrar_apertura(self, simbolo: str, precio: float, cantidad: float, sl: float, tp1: float, tp2: float, accion: str):
+    def registrar_apertura(self, simbolo: str, precio: float, cantidad: float,
+                           sl: float, tp1: float, tp2: float, accion: str):
         operacion = {
-            "simbolo":   simbolo,
-            "accion":    accion,
-            "precio":    precio,
-            "cantidad":  cantidad,
-            "sl":        sl,
-            "tp1":       tp1,
-            "tp2":       tp2,
-            "apertura":  datetime.now().strftime("%H:%M:%S"),
+            "simbolo":  simbolo,
+            "accion":   accion,
+            "precio":   precio,
+            "cantidad": cantidad,
+            "sl":       sl,
+            "tp1":      tp1,
+            "tp2":      tp2,
+            "apertura": datetime.now().strftime("%H:%M:%S"),
         }
         self.operaciones_abiertas.append(operacion)
         self.operaciones_hoy.append(operacion)
-        print(f"[gestion_riesgo] Operacion registrada: {accion} {simbolo} @ {precio} | cantidad={cantidad}")
+        print(f"[gestion_riesgo] Operacion registrada: {accion} {simbolo} @ {precio}")
 
     def registrar_cierre(self, simbolo: str, precio_cierre: float):
         for op in self.operaciones_abiertas:
@@ -178,5 +175,4 @@ class GestorRiesgo:
             "capital_en_riesgo":    f"{self.config['riesgo_por_operacion']*100}% por operacion",
         }
 
-# Instancia global compartida entre agentes
 gestor = GestorRiesgo()

@@ -2,37 +2,32 @@
 from datetime import datetime
 import pytz
 
-# Sesiones de mercado en UTC
 SESIONES = {
-    "asia":   {"inicio": 0,  "fin": 8,  "activos": ["BTCUSDT", "ETHUSDT", "BNBUSDT"],        "calidad": "media"},
-    "europa": {"inicio": 7,  "fin": 16, "activos": ["BTCUSDT", "ETHUSDT", "SOLUSDT"],        "calidad": "alta"},
-    "usa":    {"inicio": 13, "fin": 22, "activos": ["BTCUSDT", "ETHUSDT", "SOLUSDT", "BNBUSDT"], "calidad": "alta"},
-    "overlap":{"inicio": 13, "fin": 16, "activos": ["BTCUSDT", "ETHUSDT", "SOLUSDT", "BNBUSDT"], "calidad": "muy_alta"},
+    "asia":    {"inicio": 0,  "fin": 8,  "activos": ["BTCUSDT", "ETHUSDT", "BNBUSDT"],            "calidad": "media"},
+    "europa":  {"inicio": 7,  "fin": 16, "activos": ["BTCUSDT", "ETHUSDT", "SOLUSDT"],            "calidad": "alta"},
+    "usa":     {"inicio": 13, "fin": 22, "activos": ["BTCUSDT", "ETHUSDT", "SOLUSDT", "BNBUSDT"], "calidad": "alta"},
+    "overlap": {"inicio": 13, "fin": 16, "activos": ["BTCUSDT", "ETHUSDT", "SOLUSDT", "BNBUSDT"], "calidad": "muy_alta"},
 }
 
-# Horas de alta volatilidad — mejores para trading
 HORAS_OPTIMAS = [8, 9, 13, 14, 15, 16, 20, 21]
-
-# Horas a evitar — baja liquidez
-HORAS_EVITAR = [0, 1, 2, 3, 4, 5, 6]
+HORAS_EVITAR  = [0, 1, 2, 3, 4, 5, 6]
 
 def obtener_sesion_actual() -> dict:
-    utc  = pytz.UTC
-    hora = datetime.now(utc).hour
+    utc    = pytz.UTC
+    hora   = datetime.now(utc).hour
     minuto = datetime.now(utc).minute
 
     sesiones_activas = []
     for nombre, sesion in SESIONES.items():
         if sesion["inicio"] <= hora < sesion["fin"]:
             sesiones_activas.append({
-                "nombre":   nombre,
-                "calidad":  sesion["calidad"],
-                "activos":  sesion["activos"],
+                "nombre":            nombre,
+                "calidad":           sesion["calidad"],
+                "activos":           sesion["activos"],
                 "minutos_restantes": (sesion["fin"] - hora) * 60 - minuto,
             })
 
-    # Overlap es la mejor sesion
-    es_overlap = hora >= 13 and hora < 16
+    es_overlap = 13 <= hora < 16
     es_optima  = hora in HORAS_OPTIMAS
     es_evitar  = hora in HORAS_EVITAR
 
@@ -53,14 +48,14 @@ def obtener_sesion_actual() -> dict:
         score = 3
 
     return {
-        "hora_utc":        hora,
-        "minuto_utc":      minuto,
-        "sesiones_activas": sesiones_activas,
-        "es_overlap":      es_overlap,
-        "es_optima":       es_optima,
-        "es_evitar":       es_evitar,
-        "recomendacion":   recomendacion,
-        "score_sesion":    score,
+        "hora_utc":             hora,
+        "minuto_utc":           minuto,
+        "sesiones_activas":     sesiones_activas,
+        "es_overlap":           es_overlap,
+        "es_optima":            es_optima,
+        "es_evitar":            es_evitar,
+        "recomendacion":        recomendacion,
+        "score_sesion":         score,
         "activos_recomendados": sesiones_activas[0]["activos"] if sesiones_activas else ["BTCUSDT", "ETHUSDT"],
     }
 
@@ -71,30 +66,38 @@ def debe_operar() -> dict:
     # No opera en horas de muy baja liquidez
     if sesion["es_evitar"]:
         return {
-            "operar":    False,
-            "razon":     f"Hora {hora}:00 UTC — baja liquidez, esperar sesion Asia (8:00 UTC)",
-            "score":     sesion["score_sesion"],
-            "sesion":    sesion,
+            "operar": False,
+            "razon":  f"Hora {hora}:00 UTC — baja liquidez, esperar sesion Asia (8:00 UTC)",
+            "score":  sesion["score_sesion"],
+            "sesion": sesion,
         }
 
-    # Opera en cualquier otra hora pero con diferente agresividad
+    # Score minimo 3 para operar — evita horas marginales
+    if sesion["score_sesion"] < 3:
+        return {
+            "operar": False,
+            "razon":  f"Score {sesion['score_sesion']}/10 — insuficiente para operar",
+            "score":  sesion["score_sesion"],
+            "sesion": sesion,
+        }
+
     if sesion["score_sesion"] >= 7:
-        agresividad = "ALTA"
+        agresividad     = "ALTA"
         max_operaciones = 2
     elif sesion["score_sesion"] >= 5:
-        agresividad = "MEDIA"
+        agresividad     = "MEDIA"
         max_operaciones = 1
     else:
-        agresividad = "BAJA"
+        agresividad     = "BAJA"
         max_operaciones = 1
 
     return {
-        "operar":           True,
-        "agresividad":      agresividad,
-        "max_operaciones":  max_operaciones,
-        "razon":            sesion["recomendacion"],
-        "score":            sesion["score_sesion"],
-        "sesion":           sesion,
+        "operar":          True,
+        "agresividad":     agresividad,
+        "max_operaciones": max_operaciones,
+        "razon":           sesion["recomendacion"],
+        "score":           sesion["score_sesion"],
+        "sesion":          sesion,
     }
 
 def proxima_sesion_optima() -> str:

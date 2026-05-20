@@ -1,5 +1,4 @@
 # agente_financiero/agente_indicadores.py
-import requests
 import numpy as np
 import pandas as pd
 from datetime import datetime
@@ -13,17 +12,6 @@ def obtener_velas_binance(simbolo: str, intervalo: str = "5m", limite: int = 200
     except Exception as e:
         print(f"[agente_indicadores] Error cache {simbolo}: {e}")
         return pd.DataFrame()
-        df = pd.DataFrame(r.json(), columns=[
-            "timestamp","open","high","low","close","volume",
-            "close_time","quote_volume","trades","taker_buy_base","taker_buy_quote","ignore"
-        ])
-        for col in ["open","high","low","close","volume"]:
-            df[col] = df[col].astype(float)
-        df["timestamp"] = pd.to_datetime(df["timestamp"], unit="ms")
-        return df
-    except Exception as e:
-        print(f"[agente_indicadores] Error {simbolo}: {e}")
-        return pd.DataFrame()
 
 def calcular_macd(closes: np.ndarray) -> dict:
     def ema(data, periodo):
@@ -33,13 +21,12 @@ def calcular_macd(closes: np.ndarray) -> dict:
             result.append(precio * k + result[-1] * (1 - k))
         return np.array(result)
 
-    ema12 = ema(closes, 12)
-    ema26 = ema(closes, 26)
-    macd_line = ema12 - ema26
+    ema12       = ema(closes, 12)
+    ema26       = ema(closes, 26)
+    macd_line   = ema12 - ema26
     signal_line = ema(macd_line, 9)
-    histograma = macd_line - signal_line
+    histograma  = macd_line - signal_line
 
-    # Detectar divergencia
     divergencia = None
     if len(histograma) >= 3:
         if histograma[-1] > histograma[-2] > histograma[-3]:
@@ -58,11 +45,11 @@ def calcular_macd(closes: np.ndarray) -> dict:
         cruce = "CRUCE_BAJISTA"
 
     return {
-        "macd": round(float(macd_line[-1]), 4),
-        "signal": round(float(signal_line[-1]), 4),
+        "macd":       round(float(macd_line[-1]), 4),
+        "signal":     round(float(signal_line[-1]), 4),
         "histograma": round(float(histograma[-1]), 4),
-        "divergencia": divergencia,
-        "cruce": cruce,
+        "divergencia":divergencia,
+        "cruce":      cruce,
     }
 
 def calcular_estocastico(highs, lows, closes, k_periodo=14, d_periodo=3) -> dict:
@@ -90,27 +77,26 @@ def calcular_estocastico(highs, lows, closes, k_periodo=14, d_periodo=3) -> dict
         señal = "cruce_bajista_zona_alta"
 
     return {
-        "k": round(float(k_vals[-1]), 1),
-        "d": round(float(d_vals[-1]), 1),
+        "k":     round(float(k_vals[-1]), 1),
+        "d":     round(float(d_vals[-1]), 1),
         "señal": señal,
     }
 
 def calcular_vwap(df: pd.DataFrame) -> dict:
     df = df.copy()
     df["precio_tipico"] = (df["high"] + df["low"] + df["close"]) / 3
-    df["vol_precio"] = df["precio_tipico"] * df["volume"]
-    vwap = df["vol_precio"].cumsum() / df["volume"].cumsum()
-    precio_actual = df["close"].iloc[-1]
-    vwap_actual = vwap.iloc[-1]
-
-    posicion = "sobre_vwap_ALCISTA" if precio_actual > vwap_actual else "bajo_vwap_BAJISTA"
-    distancia = round(((precio_actual - vwap_actual) / vwap_actual) * 100, 3)
+    df["vol_precio"]    = df["precio_tipico"] * df["volume"]
+    vwap          = df["vol_precio"].cumsum() / df["volume"].cumsum()
+    precio_actual = float(df["close"].iloc[-1])
+    vwap_actual   = float(vwap.iloc[-1])
+    posicion      = "sobre_vwap_ALCISTA" if precio_actual > vwap_actual else "bajo_vwap_BAJISTA"
+    distancia     = round(((precio_actual - vwap_actual) / vwap_actual) * 100, 3)
 
     return {
-        "vwap": round(float(vwap_actual), 4),
-        "precio": round(float(precio_actual), 4),
-        "posicion": posicion,
-        "distancia_pct": distancia,
+        "vwap":         round(vwap_actual, 4),
+        "precio":       round(precio_actual, 4),
+        "posicion":     posicion,
+        "distancia_pct":distancia,
     }
 
 def calcular_obv(closes, volumes) -> dict:
@@ -123,13 +109,13 @@ def calcular_obv(closes, volumes) -> dict:
         else:
             obv.append(obv[-1])
 
-    obv = np.array(obv)
+    obv           = np.array(obv)
     tendencia_obv = "acumulacion" if obv[-1] > obv[-10] else "distribucion"
-    aceleracion = "acelerando" if abs(obv[-1] - obv[-5]) > abs(obv[-5] - obv[-10]) else "desacelerando"
+    aceleracion   = "acelerando" if abs(obv[-1] - obv[-5]) > abs(obv[-5] - obv[-10]) else "desacelerando"
 
     return {
-        "obv_actual": round(float(obv[-1]), 0),
-        "tendencia": tendencia_obv,
+        "obv_actual":  round(float(obv[-1]), 0),
+        "tendencia":   tendencia_obv,
         "aceleracion": aceleracion,
     }
 
@@ -143,26 +129,22 @@ def calcular_atr(highs, lows, closes, periodo=14) -> dict:
         )
         trs.append(tr)
 
-    atr = np.mean(trs[-periodo:])
+    atr    = np.mean(trs[-periodo:])
     precio = closes[-1]
-    stop_loss_largo  = round(precio - (atr * 2.5), 4)
-    stop_loss_corto  = round(precio + (atr * 2.5), 4)
-    take_profit_1r   = round(precio + (atr * 5.0), 4)
-    take_profit_2r   = round(precio + (atr * 7.5), 4)
 
     return {
-        "atr": round(float(atr), 4),
-        "atr_pct": round((atr / precio) * 100, 3),
-        "stop_loss_largo": stop_loss_largo,
-        "stop_loss_corto": stop_loss_corto,
-        "take_profit_1r": take_profit_1r,
-        "take_profit_2r": take_profit_2r,
+        "atr":             round(float(atr), 4),
+        "atr_pct":         round((atr / precio) * 100, 3),
+        "stop_loss_largo": round(precio - (atr * 2.5), 4),
+        "stop_loss_corto": round(precio + (atr * 2.5), 4),
+        "take_profit_1r":  round(precio + (atr * 5.0), 4),
+        "take_profit_2r":  round(precio + (atr * 7.5), 4),
     }
 
 def calcular_williams_r(highs, lows, closes, periodo=14) -> dict:
     h_max = np.max(highs[-periodo:])
     l_min = np.min(lows[-periodo:])
-    wr = ((h_max - closes[-1]) / (h_max - l_min)) * -100 if h_max != l_min else -50
+    wr    = ((h_max - closes[-1]) / (h_max - l_min)) * -100 if h_max != l_min else -50
 
     señal = "neutral"
     if wr < -80:
@@ -186,47 +168,52 @@ def analizar_indicadores_completo() -> list:
         lows    = df["low"].values
         volumes = df["volume"].values
 
-        macd       = calcular_macd(closes)
-        estoc      = calcular_estocastico(highs, lows, closes)
-        vwap       = calcular_vwap(df)
-        obv        = calcular_obv(closes, volumes)
-        atr        = calcular_atr(highs, lows, closes)
-        williams   = calcular_williams_r(highs, lows, closes)
+        macd     = calcular_macd(closes)
+        estoc    = calcular_estocastico(highs, lows, closes)
+        vwap     = calcular_vwap(df)
+        obv      = calcular_obv(closes, volumes)
+        atr      = calcular_atr(highs, lows, closes)
+        williams = calcular_williams_r(highs, lows, closes)
 
-        # Puntuacion de confluencia
         puntos_alcistas = 0
         puntos_bajistas = 0
 
-        if macd.get("cruce") == "CRUCE_ALCISTA": puntos_alcistas += 2
-        if macd.get("cruce") == "CRUCE_BAJISTA": puntos_bajistas += 2
+        if macd.get("cruce") == "CRUCE_ALCISTA":                                    puntos_alcistas += 2
+        if macd.get("cruce") == "CRUCE_BAJISTA":                                    puntos_bajistas += 2
         if macd.get("divergencia") in ["alcista_acelerando","posible_rebote_alcista"]: puntos_alcistas += 1
-        if macd.get("divergencia") in ["bajista_acelerando","posible_caida_bajista"]: puntos_bajistas += 1
-        if "COMPRA" in estoc.get("señal",""): puntos_alcistas += 2
-        if "VENTA" in estoc.get("señal",""): puntos_bajistas += 2
-        if "ALCISTA" in vwap.get("posicion",""): puntos_alcistas += 1
-        if "BAJISTA" in vwap.get("posicion",""): puntos_bajistas += 1
-        if obv.get("tendencia") == "acumulacion": puntos_alcistas += 1
-        if obv.get("tendencia") == "distribucion": puntos_bajistas += 1
-        if "COMPRA" in williams.get("señal",""): puntos_alcistas += 2
-        if "VENTA" in williams.get("señal",""): puntos_bajistas += 2
+        if macd.get("divergencia") in ["bajista_acelerando","posible_caida_bajista"]:  puntos_bajistas += 1
+        if "COMPRA" in estoc.get("señal",""):                                       puntos_alcistas += 2
+        if "VENTA"  in estoc.get("señal",""):                                       puntos_bajistas += 2
+        if "ALCISTA" in vwap.get("posicion",""):                                    puntos_alcistas += 1
+        if "BAJISTA" in vwap.get("posicion",""):                                    puntos_bajistas += 1
+        if obv.get("tendencia") == "acumulacion":                                   puntos_alcistas += 1
+        if obv.get("tendencia") == "distribucion":                                  puntos_bajistas += 1
+        if "COMPRA" in williams.get("señal",""):                                    puntos_alcistas += 2
+        if "VENTA"  in williams.get("señal",""):                                    puntos_bajistas += 2
 
-        total = puntos_alcistas + puntos_bajistas
+        total     = puntos_alcistas + puntos_bajistas
         confianza = round((max(puntos_alcistas, puntos_bajistas) / total) * 100) if total > 0 else 50
-        señal_final = "COMPRAR" if puntos_alcistas > puntos_bajistas else "VENDER" if puntos_bajistas > puntos_alcistas else "ESPERAR"
+
+        if puntos_alcistas > puntos_bajistas:
+            señal_final = "COMPRAR"
+        elif puntos_bajistas > puntos_alcistas:
+            señal_final = "VENDER"
+        else:
+            señal_final = "ESPERAR"
 
         resultados.append({
-            "simbolo": simbolo,
-            "precio": vwap["precio"],
-            "señal": señal_final,
-            "confianza": confianza,
-            "puntos_alcistas": puntos_alcistas,
-            "puntos_bajistas": puntos_bajistas,
-            "macd": macd,
-            "estocastico": estoc,
-            "vwap": vwap,
-            "obv": obv,
-            "atr": atr,
-            "williams_r": williams,
+            "simbolo":        simbolo,
+            "precio":         vwap["precio"],
+            "señal":          señal_final,
+            "confianza":      confianza,
+            "puntos_alcistas":puntos_alcistas,
+            "puntos_bajistas":puntos_bajistas,
+            "macd":           macd,
+            "estocastico":    estoc,
+            "vwap":           vwap,
+            "obv":            obv,
+            "atr":            atr,
+            "williams_r":     williams,
         })
 
     return resultados
@@ -236,12 +223,11 @@ def obtener_reporte_indicadores() -> str:
     lineas = []
     for r in resultados:
         lineas.append(
-            f"{r['simbolo']}: {r['señal']} | confianza={r['confianza']}% | "
-            f"alcistas={r['puntos_alcistas']} bajistas={r['puntos_bajistas']} | "
+            f"{r['simbolo']}: {r['señal']} | conf={r['confianza']}% | "
+            f"C={r['puntos_alcistas']} V={r['puntos_bajistas']} | "
             f"MACD={r['macd'].get('cruce','sin_cruce')} | "
             f"Estoc={r['estocastico']['señal']} | "
             f"VWAP={r['vwap']['posicion']} | "
-            f"OBV={r['obv']['tendencia']} | "
             f"WR={r['williams_r']['señal']}"
         )
     return "\n".join(lineas)

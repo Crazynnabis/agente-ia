@@ -13,7 +13,8 @@ from agente_financiero.digestor_riesgo import ejecutar_digestor_riesgo
 from agente_financiero.horario_trading import debe_operar
 from agente_financiero.logger_trading import log_ciclo, obtener_estadisticas_dia
 
-ACTIVOS = ["BTCUSDT", "ETHUSDT", "SOLUSDT", "BNBUSDT", "AAPL", "NVDA", "MSFT", "TSLA", "SPY", "QQQ"]
+# Solo crypto — activos con pipeline tecnico completo
+ACTIVOS = ["BTCUSDT", "ETHUSDT", "SOLUSDT", "BNBUSDT"]
 
 async def ejecutar_ciclo_maestro() -> dict:
     inicio    = datetime.now()
@@ -130,9 +131,10 @@ async def ejecutar_ciclo_maestro() -> dict:
             "take_profit_2":    take_profit2,
         })
 
+    # Umbral subido a 80% para mayor precision
     señales_fuertes = [
         t for t in tabla_maestra
-        if t["confluencia"] in ["MUY_ALTA", "ALTA"] and t["confianza_final"] >= 70
+        if t["confluencia"] in ["MUY_ALTA", "ALTA"] and t["confianza_final"] >= 80
     ]
 
     print(f"\n[MAESTRO] Señales fuertes: {len(señales_fuertes)}")
@@ -180,7 +182,7 @@ Analisis: {ciclo_contexto['analisis_consolidado'][:300]}
     print("[MAESTRO] Generando decision maestra con IA...")
     respuesta = await chat(
         mensajes=[{"role": "user", "content": f"TABLA MAESTRA:\n{resumen_tabla}\n\n{resumen_contexto}\n\nSEÑALES APROBADAS POR RIESGO: {len(señales_aprobadas)}"}],
-        system="Eres el cerebro maestro de un sistema de trading algoritmico profesional. Recibes analisis de 4 sistemas: 1.TECNICO BASICO: velas+indicadores+orderflow+niveles+onchain 2.TECNICO AVANZADO: funding+liquidaciones+estructura+volume_profile 3.ESTRATEGIAS: ORB+VWAP+Gap+MeanReversion+NewsMomentum 4.CONTEXTO: sentimiento+macro+fundamental+historico+petroleo. Prioriza señales donde al menos 3 sistemas coinciden. El contexto actua como filtro. Entrega SOLO decisiones con confluencia MUY_ALTA o ALTA y confianza mayor a 70%. Formato: DECISION_MAESTRA_N: - ACCION: COMPRAR o VENDER - SIMBOLO: nombre - PRECIO_ENTRADA: numero - STOP_LOSS: numero - TAKE_PROFIT_1: numero - TAKE_PROFIT_2: numero - CONFIANZA_SISTEMA: porcentaje - SISTEMAS_CONFIRMACION: cuales sistemas confirman - RAZON_MAESTRA: dos oraciones - HORIZONTE: timeframe - PRIORIDAD: 1 a 3. Si no hay señales: SISTEMA_EN_ESPERA. Responde en español sin texto adicional.",
+        system="Eres el cerebro maestro de un sistema de trading algoritmico profesional. Recibes analisis de 4 sistemas: 1.TECNICO BASICO: velas+indicadores+orderflow+niveles+onchain 2.TECNICO AVANZADO: funding+liquidaciones+estructura+volume_profile 3.ESTRATEGIAS: ORB+VWAP+Gap+MeanReversion+NewsMomentum+VIX+Arbitraje 4.CONTEXTO: sentimiento+macro+fundamental+historico+petroleo+trends+estacionalidad+opciones. Prioriza señales donde al menos 3 sistemas coinciden. El contexto actua como filtro — mercado bajista evita compras. Entrega SOLO decisiones con confluencia MUY_ALTA o ALTA y confianza MAYOR A 80%. Formato: DECISION_MAESTRA_N: - ACCION: COMPRAR o VENDER - SIMBOLO: nombre - PRECIO_ENTRADA: numero - STOP_LOSS: numero - TAKE_PROFIT_1: numero (ratio minimo 2:1) - TAKE_PROFIT_2: numero (ratio minimo 3:1) - CONFIANZA_SISTEMA: porcentaje - SISTEMAS_CONFIRMACION: cuales sistemas confirman - RAZON_MAESTRA: dos oraciones - HORIZONTE: timeframe - PRIORIDAD: 1 a 3. Si no hay señales: SISTEMA_EN_ESPERA. Responde en español sin texto adicional.",
         max_tokens=1000
     )
 
