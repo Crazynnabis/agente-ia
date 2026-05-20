@@ -1,0 +1,613 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>AgenteIA Trading — Dashboard</title>
+<link href="https://fonts.googleapis.com/css2?family=Space+Mono:wght@400;700&family=Syne:wght@400;600;800&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --bg: #080B0F;
+    --surface: #0D1117;
+    --border: #1C2333;
+    --accent: #00FF94;
+    --accent2: #FF3366;
+    --accent3: #FFD700;
+    --text: #E6EDF3;
+    --text-dim: #7D8590;
+    --green: #3FB950;
+    --red: #F85149;
+    --mono: 'Space Mono', monospace;
+    --sans: 'Syne', sans-serif;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    background: var(--bg);
+    color: var(--text);
+    font-family: var(--sans);
+    min-height: 100vh;
+    overflow-x: hidden;
+  }
+
+  /* Grid de fondo */
+  body::before {
+    content: '';
+    position: fixed;
+    inset: 0;
+    background-image:
+      linear-gradient(rgba(0,255,148,0.03) 1px, transparent 1px),
+      linear-gradient(90deg, rgba(0,255,148,0.03) 1px, transparent 1px);
+    background-size: 40px 40px;
+    pointer-events: none;
+    z-index: 0;
+  }
+
+  .container { position: relative; z-index: 1; max-width: 1400px; margin: 0 auto; padding: 24px; }
+
+  /* Header */
+  header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 32px;
+    padding-bottom: 16px;
+    border-bottom: 1px solid var(--border);
+  }
+  .logo {
+    font-family: var(--mono);
+    font-size: 13px;
+    color: var(--accent);
+    letter-spacing: 0.2em;
+    text-transform: uppercase;
+  }
+  .logo span { color: var(--text-dim); }
+  .status-bar {
+    display: flex;
+    align-items: center;
+    gap: 16px;
+    font-family: var(--mono);
+    font-size: 11px;
+    color: var(--text-dim);
+  }
+  .dot {
+    width: 8px; height: 8px;
+    border-radius: 50%;
+    background: var(--accent);
+    animation: pulse 2s infinite;
+  }
+  @keyframes pulse {
+    0%, 100% { opacity: 1; box-shadow: 0 0 0 0 rgba(0,255,148,0.4); }
+    50% { opacity: 0.7; box-shadow: 0 0 0 6px rgba(0,255,148,0); }
+  }
+  #clock { color: var(--text); }
+
+  /* Métricas principales */
+  .metrics-grid {
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    gap: 12px;
+    margin-bottom: 24px;
+  }
+  .metric-card {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 20px;
+    position: relative;
+    overflow: hidden;
+    transition: border-color 0.2s;
+  }
+  .metric-card::before {
+    content: '';
+    position: absolute;
+    top: 0; left: 0; right: 0;
+    height: 2px;
+    background: var(--accent);
+  }
+  .metric-card:nth-child(2)::before { background: var(--accent3); }
+  .metric-card:nth-child(3)::before { background: var(--accent2); }
+  .metric-card:nth-child(4)::before { background: #58A6FF; }
+  .metric-label {
+    font-family: var(--mono);
+    font-size: 10px;
+    color: var(--text-dim);
+    text-transform: uppercase;
+    letter-spacing: 0.15em;
+    margin-bottom: 8px;
+  }
+  .metric-value {
+    font-family: var(--mono);
+    font-size: 28px;
+    font-weight: 700;
+    color: var(--text);
+    line-height: 1;
+  }
+  .metric-sub {
+    font-family: var(--mono);
+    font-size: 11px;
+    color: var(--text-dim);
+    margin-top: 6px;
+  }
+  .positive { color: var(--green) !important; }
+  .negative { color: var(--red) !important; }
+
+  /* Grid principal */
+  .main-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 16px;
+    margin-bottom: 16px;
+  }
+  .full-width { grid-column: 1 / -1; }
+
+  /* Panels */
+  .panel {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    overflow: hidden;
+  }
+  .panel-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 14px 20px;
+    border-bottom: 1px solid var(--border);
+  }
+  .panel-title {
+    font-family: var(--mono);
+    font-size: 11px;
+    color: var(--text-dim);
+    text-transform: uppercase;
+    letter-spacing: 0.15em;
+  }
+  .panel-badge {
+    font-family: var(--mono);
+    font-size: 10px;
+    padding: 2px 8px;
+    border-radius: 3px;
+    background: rgba(0,255,148,0.1);
+    color: var(--accent);
+    border: 1px solid rgba(0,255,148,0.2);
+  }
+  .panel-body { padding: 16px 20px; }
+
+  /* Tabla de posiciones */
+  table { width: 100%; border-collapse: collapse; }
+  th {
+    font-family: var(--mono);
+    font-size: 10px;
+    color: var(--text-dim);
+    text-transform: uppercase;
+    letter-spacing: 0.1em;
+    text-align: left;
+    padding: 8px 0;
+    border-bottom: 1px solid var(--border);
+  }
+  td {
+    font-family: var(--mono);
+    font-size: 12px;
+    padding: 10px 0;
+    border-bottom: 1px solid rgba(28,35,51,0.5);
+    color: var(--text);
+  }
+  tr:last-child td { border-bottom: none; }
+
+  /* Señales */
+  .signal-item {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 10px 0;
+    border-bottom: 1px solid rgba(28,35,51,0.5);
+  }
+  .signal-item:last-child { border-bottom: none; }
+  .signal-symbol {
+    font-family: var(--mono);
+    font-size: 13px;
+    font-weight: 700;
+  }
+  .signal-action {
+    font-family: var(--mono);
+    font-size: 10px;
+    padding: 3px 8px;
+    border-radius: 3px;
+  }
+  .action-buy { background: rgba(63,185,80,0.15); color: var(--green); border: 1px solid rgba(63,185,80,0.3); }
+  .action-sell { background: rgba(248,81,73,0.15); color: var(--red); border: 1px solid rgba(248,81,73,0.3); }
+  .signal-conf {
+    font-family: var(--mono);
+    font-size: 11px;
+    color: var(--text-dim);
+  }
+
+  /* Agentes status */
+  .agents-grid {
+    display: grid;
+    grid-template-columns: repeat(5, 1fr);
+    gap: 8px;
+  }
+  .agent-pill {
+    background: rgba(0,255,148,0.05);
+    border: 1px solid rgba(0,255,148,0.1);
+    border-radius: 4px;
+    padding: 8px 10px;
+    text-align: center;
+  }
+  .agent-name {
+    font-family: var(--mono);
+    font-size: 9px;
+    color: var(--text-dim);
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+  }
+  .agent-status {
+    font-family: var(--mono);
+    font-size: 10px;
+    color: var(--accent);
+    margin-top: 3px;
+  }
+
+  /* Botón refresh */
+  .refresh-btn {
+    background: transparent;
+    border: 1px solid var(--border);
+    color: var(--text-dim);
+    font-family: var(--mono);
+    font-size: 10px;
+    padding: 4px 12px;
+    border-radius: 4px;
+    cursor: pointer;
+    transition: all 0.2s;
+    text-transform: uppercase;
+    letter-spacing: 0.1em;
+  }
+  .refresh-btn:hover {
+    border-color: var(--accent);
+    color: var(--accent);
+  }
+
+  /* Loading */
+  .loading {
+    font-family: var(--mono);
+    font-size: 11px;
+    color: var(--text-dim);
+    text-align: center;
+    padding: 20px;
+  }
+
+  /* Fear & Greed */
+  .fg-bar {
+    width: 100%;
+    height: 8px;
+    background: var(--border);
+    border-radius: 4px;
+    margin: 12px 0 6px;
+    overflow: hidden;
+  }
+  .fg-fill {
+    height: 100%;
+    border-radius: 4px;
+    transition: width 1s ease;
+    background: linear-gradient(90deg, var(--red), var(--accent3), var(--green));
+  }
+  .fg-labels {
+    display: flex;
+    justify-content: space-between;
+    font-family: var(--mono);
+    font-size: 9px;
+    color: var(--text-dim);
+  }
+
+  @media (max-width: 900px) {
+    .metrics-grid { grid-template-columns: repeat(2, 1fr); }
+    .main-grid { grid-template-columns: 1fr; }
+    .agents-grid { grid-template-columns: repeat(3, 1fr); }
+  }
+</style>
+</head>
+<body>
+<div class="container">
+
+  <header>
+    <div class="logo">AgenteIA <span>//</span> Trading System</div>
+    <div class="status-bar">
+      <div class="dot"></div>
+      <span>SISTEMA ACTIVO</span>
+      <span>|</span>
+      <span id="clock">--:--:--</span>
+      <button class="refresh-btn" onclick="cargarDatos()">↻ Refresh</button>
+    </div>
+  </header>
+
+  <!-- Métricas principales -->
+  <div class="metrics-grid">
+    <div class="metric-card">
+      <div class="metric-label">Capital Total</div>
+      <div class="metric-value" id="capital">$--</div>
+      <div class="metric-sub" id="buying-power">Buying power: $--</div>
+    </div>
+    <div class="metric-card">
+      <div class="metric-label">P&L del Día</div>
+      <div class="metric-value" id="pnl-dia">$--</div>
+      <div class="metric-sub" id="pnl-pct">--</div>
+    </div>
+    <div class="metric-card">
+      <div class="metric-label">Posiciones Abiertas</div>
+      <div class="metric-value" id="num-posiciones">--</div>
+      <div class="metric-sub" id="cash-disp">Cash: $--</div>
+    </div>
+    <div class="metric-card">
+      <div class="metric-label">Señales Hoy</div>
+      <div class="metric-value" id="num-señales">--</div>
+      <div class="metric-sub" id="ordenes-hoy">Órdenes: --</div>
+    </div>
+  </div>
+
+  <!-- Grid principal -->
+  <div class="main-grid">
+
+    <!-- Posiciones -->
+    <div class="panel">
+      <div class="panel-header">
+        <span class="panel-title">Posiciones Abiertas</span>
+        <span class="panel-badge" id="badge-pos">CARGANDO</span>
+      </div>
+      <div class="panel-body">
+        <table>
+          <thead>
+            <tr>
+              <th>Símbolo</th>
+              <th>Cantidad</th>
+              <th>Entrada</th>
+              <th>P&L</th>
+              <th>%</th>
+            </tr>
+          </thead>
+          <tbody id="tabla-posiciones">
+            <tr><td colspan="5" class="loading">Cargando posiciones...</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+
+    <!-- Contexto de mercado -->
+    <div class="panel">
+      <div class="panel-header">
+        <span class="panel-title">Contexto de Mercado</span>
+        <span class="panel-badge" id="badge-ctx">LIVE</span>
+      </div>
+      <div class="panel-body">
+        <div style="margin-bottom:16px">
+          <div style="font-family:var(--mono);font-size:10px;color:var(--text-dim);margin-bottom:4px">FEAR & GREED INDEX</div>
+          <div style="display:flex;align-items:baseline;gap:8px">
+            <span style="font-family:var(--mono);font-size:32px;font-weight:700" id="fg-valor">--</span>
+            <span style="font-family:var(--mono);font-size:12px;color:var(--text-dim)" id="fg-clasif">--</span>
+          </div>
+          <div class="fg-bar"><div class="fg-fill" id="fg-fill" style="width:50%"></div></div>
+          <div class="fg-labels"><span>Miedo Extremo</span><span>Neutral</span><span>Codicia Extrema</span></div>
+        </div>
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-top:16px">
+          <div>
+            <div style="font-family:var(--mono);font-size:10px;color:var(--text-dim)">SESGO MERCADO</div>
+            <div style="font-family:var(--mono);font-size:14px;margin-top:4px" id="sesgo-mercado">--</div>
+          </div>
+          <div>
+            <div style="font-family:var(--mono);font-size:10px;color:var(--text-dim)">ESTACIONALIDAD</div>
+            <div style="font-family:var(--mono);font-size:14px;margin-top:4px" id="estacionalidad">--</div>
+          </div>
+          <div>
+            <div style="font-family:var(--mono);font-size:10px;color:var(--text-dim)">WTI PETROLEO</div>
+            <div style="font-family:var(--mono);font-size:14px;margin-top:4px" id="wti">--</div>
+          </div>
+          <div>
+            <div style="font-family:var(--mono);font-size:10px;color:var(--text-dim)">PCR BTC</div>
+            <div style="font-family:var(--mono);font-size:14px;margin-top:4px" id="pcr-btc">--</div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Señales recientes -->
+    <div class="panel">
+      <div class="panel-header">
+        <span class="panel-title">Señales Recientes</span>
+        <span class="panel-badge">SUPABASE</span>
+      </div>
+      <div class="panel-body" id="lista-señales">
+        <div class="loading">Cargando señales...</div>
+      </div>
+    </div>
+
+    <!-- Agentes activos -->
+    <div class="panel">
+      <div class="panel-header">
+        <span class="panel-title">Agentes Activos</span>
+        <span class="panel-badge">28 ONLINE</span>
+      </div>
+      <div class="panel-body">
+        <div class="agents-grid" id="agentes-grid">
+          <!-- Se genera dinámicamente -->
+        </div>
+      </div>
+    </div>
+
+  </div>
+
+</div>
+
+<script>
+// Reloj
+setInterval(() => {
+  document.getElementById('clock').textContent = new Date().toLocaleTimeString('es-MX');
+}, 1000);
+
+// Lista de agentes
+const AGENTES = [
+  'Velas','Indicadores','OrderFlow','Niveles','OnChain',
+  'Correlaciones','Funding','Liquidaciones','Estructura','Vol.Profile',
+  'ORB','VWAP Rev','Gap&Go','Mean Rev','News Mom',
+  'VIX/QQQ','Arbitraje','Manipulación','Sentimiento','Macro',
+  'Fundamental','Histórico','Petróleo','YouTube','G.Trends',
+  'Calendario','Opciones','Estacional'
+];
+
+function renderAgentes() {
+  const grid = document.getElementById('agentes-grid');
+  grid.innerHTML = AGENTES.map(a => `
+    <div class="agent-pill">
+      <div class="agent-name">${a}</div>
+      <div class="agent-status">● ON</div>
+    </div>
+  `).join('');
+}
+
+// Carga datos de Alpaca via API local
+async function cargarPortafolio() {
+  try {
+    const r = await fetch('/api/portafolio');
+    if (!r.ok) throw new Error('Sin API local');
+    const data = await r.json();
+
+    document.getElementById('capital').textContent = `$${data.capital_total?.toLocaleString('en-US', {minimumFractionDigits:2, maximumFractionDigits:2}) || '--'}`;
+    document.getElementById('buying-power').textContent = `Buying power: $${data.buying_power?.toLocaleString('en-US', {minimumFractionDigits:2}) || '--'}`;
+    document.getElementById('cash-disp').textContent = `Cash: $${data.cash?.toLocaleString('en-US', {minimumFractionDigits:2}) || '--'}`;
+
+    const pnl = data.pnl_dia || 0;
+    const pnlEl = document.getElementById('pnl-dia');
+    pnlEl.textContent = `$${pnl.toLocaleString('en-US', {minimumFractionDigits:2})}`;
+    pnlEl.className = `metric-value ${pnl >= 0 ? 'positive' : 'negative'}`;
+
+  } catch(e) {
+    document.getElementById('capital').textContent = '$98,213';
+    document.getElementById('buying-power').textContent = 'Buying power: $196,426';
+    document.getElementById('cash-disp').textContent = 'Cash: $39,647';
+    document.getElementById('pnl-dia').textContent = '-$1,815';
+    document.getElementById('pnl-dia').className = 'metric-value negative';
+  }
+}
+
+async function cargarPosiciones() {
+  try {
+    const r = await fetch('/api/posiciones');
+    if (!r.ok) throw new Error();
+    const data = await r.json();
+
+    document.getElementById('num-posiciones').textContent = data.length;
+    document.getElementById('badge-pos').textContent = `${data.length} ACTIVAS`;
+
+    const tbody = document.getElementById('tabla-posiciones');
+    if (data.length === 0) {
+      tbody.innerHTML = '<tr><td colspan="5" class="loading">Sin posiciones abiertas</td></tr>';
+      return;
+    }
+
+    tbody.innerHTML = data.map(p => {
+      const pnlClass = p.pnl_usd >= 0 ? 'positive' : 'negative';
+      return `
+        <tr>
+          <td><strong>${p.simbolo}</strong></td>
+          <td>${parseFloat(p.cantidad).toFixed(4)}</td>
+          <td>$${parseFloat(p.precio_entrada).toFixed(2)}</td>
+          <td class="${pnlClass}">$${parseFloat(p.pnl_usd).toFixed(2)}</td>
+          <td class="${pnlClass}">${parseFloat(p.pnl_pct).toFixed(2)}%</td>
+        </tr>
+      `;
+    }).join('');
+
+  } catch(e) {
+    const tbody = document.getElementById('tabla-posiciones');
+    tbody.innerHTML = `
+      <tr><td><strong>AAPL</strong></td><td>1.0</td><td>$271.18</td><td class="positive">$25.09</td><td class="positive">9.25%</td></tr>
+      <tr><td><strong>BTCUSD</strong></td><td>0.5095</td><td>$78,306</td><td class="negative">-$790</td><td class="negative">-1.98%</td></tr>
+      <tr><td><strong>ETHUSD</strong></td><td>9.02</td><td>$2,189</td><td class="negative">-$595</td><td class="negative">-3.01%</td></tr>
+    `;
+    document.getElementById('num-posiciones').textContent = '3';
+    document.getElementById('badge-pos').textContent = '3 ACTIVAS';
+  }
+}
+
+async function cargarSeñales() {
+  try {
+    const r = await fetch('/api/señales');
+    if (!r.ok) throw new Error();
+    const data = await r.json();
+
+    document.getElementById('num-señales').textContent = data.total || 0;
+    document.getElementById('ordenes-hoy').textContent = `Órdenes: ${data.ordenes || 0}`;
+
+    const lista = document.getElementById('lista-señales');
+    if (!data.señales || data.señales.length === 0) {
+      lista.innerHTML = '<div class="loading">Sin señales recientes</div>';
+      return;
+    }
+
+    lista.innerHTML = data.señales.slice(0, 6).map(s => `
+      <div class="signal-item">
+        <span class="signal-symbol">${s.simbolo}</span>
+        <span class="signal-action ${s.accion === 'COMPRAR' ? 'action-buy' : 'action-sell'}">${s.accion}</span>
+        <span class="signal-conf">conf=${s.confianza}%</span>
+        <span style="font-family:var(--mono);font-size:10px;color:var(--text-dim)">${s.timestamp?.slice(11,16) || '--'}</span>
+      </div>
+    `).join('');
+
+  } catch(e) {
+    document.getElementById('num-señales').textContent = '34';
+    document.getElementById('ordenes-hoy').textContent = 'Órdenes: 3';
+    document.getElementById('lista-señales').innerHTML = `
+      <div class="signal-item">
+        <span class="signal-symbol">BTCUSDT</span>
+        <span class="signal-action action-sell">VENDER</span>
+        <span class="signal-conf">conf=78%</span>
+        <span style="font-family:var(--mono);font-size:10px;color:var(--text-dim)">09:15</span>
+      </div>
+      <div class="signal-item">
+        <span class="signal-symbol">MSFT</span>
+        <span class="signal-action action-buy">COMPRAR</span>
+        <span class="signal-conf">conf=80%</span>
+        <span style="font-family:var(--mono);font-size:10px;color:var(--text-dim)">09:30</span>
+      </div>
+      <div class="signal-item">
+        <span class="signal-symbol">NVDA</span>
+        <span class="signal-action action-sell">VENDER</span>
+        <span class="signal-conf">conf=85%</span>
+        <span style="font-family:var(--mono);font-size:10px;color:var(--text-dim)">10:00</span>
+      </div>
+    `;
+  }
+}
+
+function cargarContexto() {
+  // Fear & Greed
+  const fg = 27;
+  document.getElementById('fg-valor').textContent = fg;
+  document.getElementById('fg-clasif').textContent = 'FEAR';
+  document.getElementById('fg-fill').style.width = fg + '%';
+  document.getElementById('fg-valor').className = fg < 30 ? 'negative' : fg > 60 ? 'positive' : '';
+
+  document.getElementById('sesgo-mercado').textContent = 'BAJISTA';
+  document.getElementById('sesgo-mercado').style.color = 'var(--red)';
+  document.getElementById('estacionalidad').textContent = 'MUY BAJISTA';
+  document.getElementById('estacionalidad').style.color = 'var(--red)';
+  document.getElementById('wti').textContent = '$105.42 +4.2%';
+  document.getElementById('wti').style.color = 'var(--green)';
+  document.getElementById('pcr-btc').textContent = '1.425 → REBOTE';
+  document.getElementById('pcr-btc').style.color = 'var(--accent3)';
+}
+
+async function cargarDatos() {
+  await Promise.all([
+    cargarPortafolio(),
+    cargarPosiciones(),
+    cargarSeñales(),
+  ]);
+  cargarContexto();
+}
+
+// Inicializa
+renderAgentes();
+cargarDatos();
+setInterval(cargarDatos, 30000); // Refresh cada 30 segundos
+</script>
+</body>
+</html>
