@@ -7,10 +7,8 @@ ACTIVOS = ["BTCUSDT", "ETHUSDT", "SOLUSDT", "BNBUSDT"]
 
 def obtener_long_short_ratio(simbolo: str) -> dict:
     try:
-        url = "https://fapi.binance.com/futures/data/globalLongShortAccountRatio"
-        r = requests.get(url, params={
-            "symbol": simbolo, "period": "5m", "limit": 12
-        }, timeout=10)
+        url  = "https://fapi.binance.com/futures/data/globalLongShortAccountRatio"
+        r    = requests.get(url, params={"symbol": simbolo, "period": "5m", "limit": 12}, timeout=10)
         data = r.json()
 
         if not isinstance(data, list) or len(data) == 0:
@@ -44,24 +42,22 @@ def obtener_long_short_ratio(simbolo: str) -> dict:
             fuerza = "baja"
 
         return {
-            "simbolo":      simbolo,
-            "ratio":        round(ratio_actual, 3),
-            "longs_pct":    round(longs_pct, 2),
-            "shorts_pct":   round(shorts_pct, 2),
-            "tendencia":    tendencia,
-            "señal":        señal,
-            "accion":       accion,
-            "fuerza":       fuerza,
+            "simbolo":    simbolo,
+            "ratio":      round(ratio_actual, 3),
+            "longs_pct":  round(longs_pct, 2),
+            "shorts_pct": round(shorts_pct, 2),
+            "tendencia":  tendencia,
+            "señal":      señal,
+            "accion":     accion,
+            "fuerza":     fuerza,
         }
     except Exception as e:
         return {"simbolo": simbolo, "error": str(e)}
 
 def obtener_taker_ratio(simbolo: str) -> dict:
     try:
-        url = "https://fapi.binance.com/futures/data/takerlongshortRatio"
-        r = requests.get(url, params={
-            "symbol": simbolo, "period": "5m", "limit": 12
-        }, timeout=10)
+        url  = "https://fapi.binance.com/futures/data/takerlongshortRatio"
+        r    = requests.get(url, params={"symbol": simbolo, "period": "5m", "limit": 12}, timeout=10)
         data = r.json()
 
         if not isinstance(data, list) or len(data) == 0:
@@ -70,7 +66,6 @@ def obtener_taker_ratio(simbolo: str) -> dict:
         ratio_actual = float(data[-1].get("buySellRatio", 1.0))
         buy_vol      = float(data[-1].get("buyVol", 0))
         sell_vol     = float(data[-1].get("sellVol", 0))
-
         historial    = [float(d.get("buySellRatio", 1.0)) for d in data]
         promedio     = np.mean(historial)
         desviacion   = (ratio_actual - promedio) / promedio * 100 if promedio > 0 else 0
@@ -87,34 +82,34 @@ def obtener_taker_ratio(simbolo: str) -> dict:
             señal_taker = "EQUILIBRADO"
 
         return {
-            "simbolo":       simbolo,
-            "taker_ratio":   round(ratio_actual, 3),
-            "buy_vol":       round(buy_vol, 2),
-            "sell_vol":      round(sell_vol, 2),
-            "vs_promedio":   round(desviacion, 2),
-            "señal":         señal_taker,
+            "simbolo":     simbolo,
+            "taker_ratio": round(ratio_actual, 3),
+            "buy_vol":     round(buy_vol, 2),
+            "sell_vol":    round(sell_vol, 2),
+            "vs_promedio": round(desviacion, 2),
+            "señal":       señal_taker,
         }
     except Exception as e:
         return {"simbolo": simbolo, "error": str(e)}
 
 def obtener_mapa_liquidaciones(simbolo: str) -> dict:
     try:
-        r = requests.get(
+        r  = requests.get(
             "https://fapi.binance.com/fapi/v1/premiumIndex",
             params={"symbol": simbolo}, timeout=10
         )
         precio_actual = float(r.json().get("markPrice", 0))
 
-        r2 = requests.get(
+        r2   = requests.get(
             "https://fapi.binance.com/fapi/v1/depth",
             params={"symbol": simbolo, "limit": 50}, timeout=10
         )
-        book  = r2.json()
-        bids  = [[float(p), float(q)] for p, q in book.get("bids", [])]
-        asks  = [[float(p), float(q)] for p, q in book.get("asks", [])]
+        book = r2.json()
+        bids = [[float(p), float(q)] for p, q in book.get("bids", [])]
+        asks = [[float(p), float(q)] for p, q in book.get("asks", [])]
 
         if not bids or not asks:
-            return {"simbolo": simbolo, "precio_actual": precio_actual}
+            return {"simbolo": simbolo, "precio_actual": precio_actual, "contexto": "SIN_DATOS"}
 
         avg_bid = np.mean([b[1] for b in bids])
         avg_ask = np.mean([a[1] for a in asks])
@@ -125,11 +120,8 @@ def obtener_mapa_liquidaciones(simbolo: str) -> dict:
         soporte     = bids_grandes[0][0] if bids_grandes else bids[-1][0]
         resistencia = asks_grandes[0][0] if asks_grandes else asks[-1][0]
 
-        dist_s = round(((precio_actual - soporte) / precio_actual) * 100, 3)
-        dist_r = round(((resistencia - precio_actual) / precio_actual) * 100, 3)
-
-        zona_liq_longs  = round(precio_actual * 0.93, 2)
-        zona_liq_shorts = round(precio_actual * 1.07, 2)
+        dist_s = round(((precio_actual - soporte)     / precio_actual) * 100, 3) if precio_actual > 0 else 0
+        dist_r = round(((resistencia - precio_actual) / precio_actual) * 100, 3) if precio_actual > 0 else 0
 
         if dist_s < 0.3:
             contexto = "EN_SOPORTE_FUERTE — rebote probable"
@@ -147,8 +139,8 @@ def obtener_mapa_liquidaciones(simbolo: str) -> dict:
             "resistencia":      round(resistencia, 4),
             "dist_soporte_pct": dist_s,
             "dist_resist_pct":  dist_r,
-            "zona_liq_longs":   zona_liq_longs,
-            "zona_liq_shorts":  zona_liq_shorts,
+            "zona_liq_longs":   round(precio_actual * 0.93, 2),
+            "zona_liq_shorts":  round(precio_actual * 1.07, 2),
             "contexto":         contexto,
         }
     except Exception as e:
@@ -174,16 +166,18 @@ def analizar_liquidaciones_completo() -> list:
                 "RESISTENCIA" in mapa.get("contexto",""),
             ])
 
-            señal_final = "COMPRAR" if votos_compra >= 2 else ("VENDER" if votos_venta >= 2 else "ESPERAR")
+            señal_final = "COMPRAR" if votos_compra >= 2 else (
+                          "VENDER"  if votos_venta  >= 2 else "ESPERAR")
 
             resultados.append({
-                "simbolo":       simbolo,
-                "long_short":    ls,
-                "taker":         taker,
-                "mapa":          mapa,
-                "votos_compra":  votos_compra,
-                "votos_venta":   votos_venta,
-                "señal_final":   señal_final,
+                "simbolo":      simbolo,
+                "long_short":   ls,
+                "taker":        taker,
+                "mapa":         mapa,
+                "votos_compra": votos_compra,
+                "votos_venta":  votos_venta,
+                "señal_final":  señal_final,
+                "timestamp":    datetime.now().strftime("%H:%M:%S"),
             })
         else:
             resultados.append({"simbolo": simbolo, "error": "Sin datos"})
