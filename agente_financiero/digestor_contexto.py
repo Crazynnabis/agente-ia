@@ -14,16 +14,14 @@ from agente_financiero.agente_google_trends import ejecutar_google_trends
 from agente_financiero.agente_estacionalidad import analizar_estacionalidad_completo
 from agente_financiero.agente_opciones import analizar_opciones_completo
 
-# Cache para Google Trends — no bloquea el ciclo si ya tiene datos
-_trends_cache     = []
-_trends_cache_ts  = 0
+_trends_cache    = []
+_trends_cache_ts = 0
 
 async def obtener_trends_con_timeout(timeout: int = 60) -> list:
     global _trends_cache, _trends_cache_ts
     import time
     ahora = time.time()
 
-    # Si hay cache menor a 1 hora lo usa directamente
     if _trends_cache and (ahora - _trends_cache_ts) < 3600:
         print("[digestor_contexto] Trends: usando cache")
         return _trends_cache
@@ -46,11 +44,9 @@ async def obtener_trends_con_timeout(timeout: int = 60) -> list:
 async def ejecutar_ciclo_contexto() -> dict:
     timestamp = datetime.now().strftime("%H:%M:%S")
     print(f"\n[digestor_contexto] Ciclo contexto {timestamp}")
-
     print("[1/8] Ejecutando 7 agentes en paralelo + trends con timeout...")
 
-    # Los 7 agentes rapidos corren en paralelo
-    # Trends corre con timeout de 60s para no bloquear
+    # return_exceptions=True — nunca crashea
     resultados = await asyncio.gather(
         analizar_sentimiento_mercado(),
         analizar_contexto_macro(),
@@ -60,40 +56,66 @@ async def ejecutar_ciclo_contexto() -> dict:
         asyncio.to_thread(analizar_estacionalidad_completo),
         asyncio.to_thread(analizar_opciones_completo),
         obtener_trends_con_timeout(timeout=60),
+        return_exceptions=True
     )
 
-    sent_res, macro_res, fund_res, hist_res, petro_res, estac_res, opciones_res, trends_res = resultados
+    # Defaults si algún agente falla
+    defaults = [
+        {"fear_greed": {}, "analisis": "Sin datos"},
+        {"analisis": "Sin datos"},
+        {"analisis": "Sin datos"},
+        {"analisis": "Sin datos"},
+        {"analisis": "Sin datos", "precios": {}},
+        {"señal_estacional": "NEUTRAL", "confianza": 50, "ciclo_halving": {}},
+        [],
+        [],
+    ]
+
+    resultados_seguros = [
+        r if not isinstance(r, Exception) else defaults[i]
+        for i, r in enumerate(resultados)
+    ]
+
+    sent_res, macro_res, fund_res, hist_res, petro_res, estac_res, opciones_res, trends_res = resultados_seguros
+
+    # Reporta errores sin crashear
+    nombres = ["sentimiento", "macro", "fundamental", "historico", "petroleo", "estacionalidad", "opciones", "trends"]
+    for i, r in enumerate(resultados):
+        if isinstance(r, Exception):
+            print(f"[digestor_contexto] Error en {nombres[i]}: {r}")
 
     # Fear & Greed
-    fear_greed   = sent_res.get("fear_greed", {})
+    fear_greed   = sent_res.get("fear_greed", {}) if isinstance(sent_res, dict) else {}
     fg_valor     = fear_greed.get("valor_hoy", 50)
     fg_clasif    = fear_greed.get("clasificacion", "Neutral")
     fg_tendencia = fear_greed.get("tendencia", "neutral")
 
     # Analisis textuales
-    sent_analisis  = sent_res.get("analisis", "Sin datos")
-    macro_analisis = macro_res.get("analisis", "Sin datos")
-    fund_analisis  = fund_res.get("analisis", "Sin datos")
-    hist_analisis  = hist_res.get("analisis", "Sin datos")
-    petro_analisis = petro_res.get("analisis", "Sin datos")
-    wti_precio     = petro_res.get("precios", {}).get("WTI", {}).get("precio", "N/A")
-    wti_cambio     = petro_res.get("precios", {}).get("WTI", {}).get("cambio_dia", 0)
+    sent_analisis  = sent_res.get("analisis", "Sin datos") if isinstance(sent_res, dict) else "Sin datos"
+    macro_analisis = macro_res.get("analisis", "Sin datos") if isinstance(macro_res, dict) else "Sin datos"
+    fund_analisis  = fund_res.get("analisis", "Sin datos")  if isinstance(fund_res, dict)  else "Sin datos"
+    hist_analisis  = hist_res.get("analisis", "Sin datos")  if isinstance(hist_res, dict)  else "Sin datos"
+    petro_analisis = petro_res.get("analisis", "Sin datos") if isinstance(petro_res, dict) else "Sin datos"
+    wti_precio     = petro_res.get("precios", {}).get("WTI", {}).get("precio", "N/A") if isinstance(petro_res, dict) else "N/A"
+    wti_cambio     = petro_res.get("precios", {}).get("WTI", {}).get("cambio_dia", 0) if isinstance(petro_res, dict) else 0
 
     # Estacionalidad y opciones
-    estac_señal    = estac_res.get("señal_estacional", "NEUTRAL")
-    estac_conf     = estac_res.get("confianza", 50)
-    estac_fase     = estac_res.get("ciclo_halving", {}).get("fase", "N/A")
-    opciones_btc   = next((o for o in opciones_res if o.get("moneda") == "BTC"), {})
+    estac_señal    = estac_res.get("señal_estacional", "NEUTRAL") if isinstance(estac_res, dict) else "NEUTRAL"
+    estac_conf     = estac_res.get("confianza", 50) if isinstance(estac_res, dict) else 50
+    estac_fase     = estac_res.get("ciclo_halving", {}).get("fase", "N/A") if isinstance(estac_res, dict) else "N/A"
+    opciones_lista = opciones_res if isinstance(opciones_res, list) else []
+    opciones_btc   = next((o for o in opciones_lista if o.get("moneda") == "BTC"), {})
     pcr_btc        = opciones_btc.get("pcr_volumen", 1.0)
     maxpain_btc    = opciones_btc.get("max_pain", "N/A")
     opciones_señal = opciones_btc.get("señal", "ESPERAR")
 
     print(f"[digestor_contexto] F&G={fg_valor} | Estac={estac_señal} | PCR={pcr_btc} | WTI=${wti_precio}")
 
-    # Google Trends
-    trends_señales = [t for t in trends_res if t.get("señal") not in ["ESPERAR", None] and not t.get("error")]
+    # Google Trends — usa 'promedio' con fallback a 'promedio_3m'
+    trends_lista   = trends_res if isinstance(trends_res, list) else []
+    trends_señales = [t for t in trends_lista if t.get("señal") not in ["ESPERAR", None] and not t.get("error")]
     trends_resumen = "\n".join([
-        f"{t['simbolo']}: {t['señal']} | valor={t['valor_actual']} vs prom={t['promedio_3m']} | {t['razon']}"
+        f"{t['simbolo']}: {t['señal']} | valor={t['valor_actual']} vs prom={t.get('promedio', t.get('promedio_3m', 'N/A'))} | {t['razon']}"
         for t in trends_señales
     ]) if trends_señales else "Sin señales de trends disponibles"
     print(f"[digestor_contexto] Trends: {len(trends_señales)} señales")
@@ -102,28 +124,27 @@ async def ejecutar_ciclo_contexto() -> dict:
     puntos_alcista = 0
     puntos_bajista = 0
 
-    if fg_valor > 60:   puntos_alcista += 2
-    elif fg_valor > 50: puntos_alcista += 1
-    elif fg_valor < 40: puntos_bajista += 2
-    elif fg_valor < 50: puntos_bajista += 1
+    if fg_valor > 60:    puntos_alcista += 2
+    elif fg_valor > 50:  puntos_alcista += 1
+    elif fg_valor < 40:  puntos_bajista += 2
+    elif fg_valor < 50:  puntos_bajista += 1
 
     if fg_tendencia == "mejorando": puntos_alcista += 1
     else:                           puntos_bajista += 1
 
-    if wti_cambio > 2:   puntos_bajista += 1
+    if wti_cambio > 2:    puntos_bajista += 1
     elif wti_cambio < -2: puntos_alcista += 1
 
-    if "BAJISTA" in estac_señal:  puntos_bajista += 2
+    if "BAJISTA" in estac_señal:   puntos_bajista += 2
     elif "ALCISTA" in estac_señal: puntos_alcista += 2
 
     if opciones_señal == "COMPRAR": puntos_alcista += 1
     elif opciones_señal == "VENDER": puntos_bajista += 1
 
-    # Trends suma 1 punto si hay señal clara
-    if len(trends_señales) >= 3:
+    if len(trends_señales) >= 2:
         compra_trends = sum(1 for t in trends_señales if t.get("señal") == "COMPRAR")
         venta_trends  = sum(1 for t in trends_señales if t.get("señal") == "VENDER")
-        if compra_trends > venta_trends: puntos_alcista += 1
+        if compra_trends > venta_trends:  puntos_alcista += 1
         elif venta_trends > compra_trends: puntos_bajista += 1
 
     if puntos_alcista > puntos_bajista:
@@ -171,12 +192,12 @@ SESGO CALCULADO: {sesgo_contexto} ({confianza_contexto}%)
     print("[digestor_contexto] Generando analisis consolidado con IA...")
     respuesta = await chat(
         mensajes=[{"role": "user", "content": f"Consolida este contexto:\n{contexto_completo}"}],
-        system="""Eres el digestor de contexto de mercado.
+        system="""Eres el digestor de contexto de mercado para un sistema de trading de crypto y acciones.
 Entrega reporte ejecutivo con:
 1. Sesgo general (alcista/bajista/neutral) con confianza
-2. Factores macro mas importantes
+2. Factores macro mas importantes ahora mismo
 3. Nivel de riesgo: BAJO/MEDIO/ALTO
-4. Recomendacion para proximas 24 horas
+4. Recomendacion estrategica para proximas 24 horas
 Responde en español, maximo 200 palabras.""",
         max_tokens=400
     )

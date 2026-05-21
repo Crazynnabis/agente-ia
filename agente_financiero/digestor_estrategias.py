@@ -18,12 +18,15 @@ ACTIVOS = ["BTCUSDT", "ETHUSDT", "SOLUSDT", "BNBUSDT",
            "AAPL", "NVDA", "MSFT", "TSLA", "SPY", "QQQ"]
 
 async def ejecutar_ciclo_estrategias() -> dict:
-    timestamp = datetime.now().strftime("%H:%M:%S")
+    timestamp  = datetime.now().strftime("%H:%M:%S")
+    resultados = []
+    señales_fuertes = []
     print(f"\n[digestor_estrategias] Ciclo estrategias {timestamp}")
 
-    # Corre todas las estrategias en paralelo
     print("[1/5] ORB, VWAP, Gap, Mean, News en paralelo...")
-    orb_res, vwap_res, gap_res, mean_res, news_res, vix_res, arb_res, manip_res = await asyncio.gather(
+
+    # return_exceptions=True — nunca crashea aunque un agente falle
+    res = await asyncio.gather(
         asyncio.to_thread(ejecutar_analisis_orb),
         asyncio.to_thread(ejecutar_vwap_reversion),
         asyncio.to_thread(ejecutar_gap_go),
@@ -32,10 +35,70 @@ async def ejecutar_ciclo_estrategias() -> dict:
         asyncio.to_thread(obtener_señal_vix),
         asyncio.to_thread(ejecutar_arbitraje),
         asyncio.to_thread(analizar_manipulacion_completo),
+        return_exceptions=True
     )
 
-    # Procesa señales de arbitraje
-    for r in arb_res:
+    orb_res, vwap_res, gap_res, mean_res, news_res, vix_res, arb_res, manip_res = [
+        r if not isinstance(r, Exception) else []
+        for r in res
+    ]
+
+    # vix_res puede ser dict — manejo especial
+    if isinstance(vix_res, Exception):
+        vix_res = {"señal": "N/A", "fuerza": "N/A", "accion": "ESPERAR", "error": True}
+
+    # Inicializa tabla PRIMERO — antes de cualquier uso
+    tabla = {}
+    for activo in ACTIVOS:
+        tabla[activo] = {
+            "simbolo":    activo,
+            "orb":        None,
+            "vwap":       None,
+            "gap":        None,
+            "mean":       None,
+            "news":       None,
+            "vix":        None,
+            "arb":        None,
+            "manipulado": False,
+        }
+
+    # Llena tabla con resultados de cada agente
+    for r in (orb_res if isinstance(orb_res, list) else []):
+        s = r.get("simbolo", "")
+        if s in tabla:
+            tabla[s]["orb"] = r.get("señal", "ESPERAR")
+
+    for r in (vwap_res if isinstance(vwap_res, list) else []):
+        s = r.get("simbolo", "")
+        if s in tabla:
+            tabla[s]["vwap"] = r.get("señal", "ESPERAR")
+
+    for r in (gap_res if isinstance(gap_res, list) else []):
+        s = r.get("simbolo", "")
+        if s in tabla:
+            tabla[s]["gap"] = r.get("señal", "ESPERAR")
+
+    for r in (mean_res if isinstance(mean_res, list) else []):
+        s = r.get("simbolo", "")
+        if s in tabla:
+            tabla[s]["mean"] = r.get("señal", "ESPERAR")
+
+    for r in (news_res if isinstance(news_res, list) else []):
+        s = r.get("simbolo", "")
+        if s == "BTC":   s = "BTCUSDT"
+        elif s == "ETH": s = "ETHUSDT"
+        if s in tabla:
+            tabla[s]["news"] = r.get("señal", "ESPERAR")
+
+    # VIX — aplica a QQQ y SPY
+    if not vix_res.get("error") and vix_res.get("accion") != "ESPERAR":
+        for simbolo in ["QQQ", "SPY"]:
+            if simbolo in tabla:
+                tabla[simbolo]["vix"] = vix_res.get("accion", "ESPERAR")
+    print(f"[digestor_estrategias] VIX: {vix_res.get('señal','N/A')} | {vix_res.get('fuerza','N/A')}")
+
+    # Arbitraje — aplica a pares
+    for r in (arb_res if isinstance(arb_res, list) else []):
         if r.get("fuerza") in ["alta", "muy_alta"]:
             sim_a = r.get("simbolo_a", "")
             sim_b = r.get("simbolo_b", "")
@@ -44,73 +107,18 @@ async def ejecutar_ciclo_estrategias() -> dict:
             if sim_b in tabla:
                 tabla[sim_b]["arb"] = r.get("accion_b", "ESPERAR")
 
-    # Procesa señales de manipulacion — bloquea activos manipulados
-    for r in manip_res:
+    # Manipulacion — bloquea activos manipulados
+    for r in (manip_res if isinstance(manip_res, list) else []):
         sim = r.get("simbolo", "")
         if r.get("debe_evitar") and sim in tabla:
             tabla[sim]["manipulado"] = True
-            print(f"[digestor_estrategias] ALERTA: {sim} posiblemente manipulado — señales bloqueadas")
-
-        # Consolida señales por activo
-    tabla = {}
-    for activo in ACTIVOS:
-        tabla[activo] = {
-            "simbolo": activo,
-            "orb":     None,
-            "vwap":    None,
-            "gap":     None,
-            "mean":    None,
-            "news":    None,
-            "vix":     None,
-            "arb":     None,
-            "manipulado": False,
-        }
-
-    # Llena tabla con resultados
-    for r in orb_res:
-        s = r.get("simbolo", "")
-        if s in tabla:
-            tabla[s]["orb"] = r.get("señal", "ESPERAR")
-
-    for r in vwap_res:
-        s = r.get("simbolo", "")
-        if s in tabla:
-            tabla[s]["vwap"] = r.get("señal", "ESPERAR")
-
-    for r in gap_res:
-        s = r.get("simbolo", "")
-        if s in tabla:
-            tabla[s]["gap"] = r.get("señal", "ESPERAR")
-
-    for r in mean_res:
-        s = r.get("simbolo", "")
-        if s in tabla:
-            tabla[s]["mean"] = r.get("señal", "ESPERAR")
-
-    for r in news_res:
-        s = r.get("simbolo", "")
-        # Mapea BTC/ETH a BTCUSDT/ETHUSDT
-        if s == "BTC":
-            s = "BTCUSDT"
-        elif s == "ETH":
-            s = "ETHUSDT"
-        if s in tabla:
-            tabla[s]["news"] = r.get("señal", "ESPERAR")
-
-    # Agrega señal VIX a QQQ y SPY
-    if "error" not in vix_res and vix_res.get("accion") != "ESPERAR":
-        for simbolo in ["QQQ", "SPY"]:
-            if simbolo in tabla:
-                tabla[simbolo]["vix"] = vix_res.get("accion", "ESPERAR")
-    print(f"[digestor_estrategias] VIX: {vix_res.get('señal','N/A')} | {vix_res.get('fuerza','N/A')}")
+            print(f"[digestor_estrategias] ALERTA: {sim} manipulado — señales bloqueadas")
 
     # Calcula confluencia por activo
-    resultados = []
     for activo, datos in tabla.items():
-        señales = [v for k, v in datos.items() if k != "simbolo" and v is not None]
+        señales      = [v for k, v in datos.items() if k not in ["simbolo", "manipulado"] and v is not None]
         votos_compra = señales.count("COMPRAR")
         votos_venta  = señales.count("VENDER")
-        total_votos  = votos_compra + votos_venta
 
         if votos_compra >= 3:
             señal_final = "COMPRAR"
@@ -133,7 +141,6 @@ async def ejecutar_ciclo_estrategias() -> dict:
             confluencia = "BAJA"
             confianza   = 30
 
-        # Si el activo está manipulado no operar
         if datos.get("manipulado"):
             señal_final = "ESPERAR"
             confluencia = "BAJA"
@@ -155,30 +162,27 @@ async def ejecutar_ciclo_estrategias() -> dict:
 
     señales_fuertes = [r for r in resultados if r["confluencia"] in ["ALTA", "MUY_ALTA"]]
 
-    # Resumen para IA
     resumen = "\n".join([
         f"{r['simbolo']}: {r['señal_final']} | {r['confluencia']} | conf={r['confianza']}% | "
         f"C={r['votos_compra']} V={r['votos_venta']} | "
         f"ORB={r['orb']} VWAP={r['vwap']} GAP={r['gap']} MEAN={r['mean']} NEWS={r['news']}"
         for r in resultados
-    ])
+    ]) if resultados else "Sin datos de estrategias"
 
     print("[digestor_estrategias] Generando analisis con IA...")
     respuesta = await chat(
         mensajes=[{"role": "user", "content": f"SEÑALES DE ESTRATEGIAS:\n{resumen}"}],
-        system="""Eres el digestor de estrategias de trading. Recibes señales de 5 estrategias:
-ORB (opening range breakout), VWAP Reversion, Gap & Go, Mean Reversion y News Momentum.
-Entrega decisiones ejecutables SOLO para señales con confluencia ALTA o MUY_ALTA.
-
+        system="""Eres el digestor de estrategias de trading de BTC ETH SOL BNB AAPL NVDA MSFT TSLA SPY QQQ.
+Recibes señales de 5 estrategias: ORB opening range breakout, VWAP Reversion, Gap & Go, Mean Reversion y News Momentum.
+Entrega decisiones SOLO para señales con confluencia ALTA o MUY_ALTA.
 Formato:
 ESTRATEGIA_N:
 - ACCION: COMPRAR o VENDER
-- SIMBOLO: nombre
-- ESTRATEGIAS_CONFIRMACION: lista
+- SIMBOLO: nombre exacto
+- ESTRATEGIAS_CONFIRMACION: cuales estrategias confirman
 - CONFIANZA: porcentaje
-- RAZON: una oracion
+- RAZON: una oracion con el patron especifico detectado
 - HORIZONTE: 5min o 15min o 1hora
-
 Si no hay señales fuertes: SIN_SEÑALES_ESTRATEGIAS
 Responde en español sin texto adicional.""",
         max_tokens=600
