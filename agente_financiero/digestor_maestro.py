@@ -13,8 +13,16 @@ from agente_financiero.digestor_riesgo import ejecutar_digestor_riesgo
 from agente_financiero.horario_trading import debe_operar
 from agente_financiero.logger_trading import log_ciclo, obtener_estadisticas_dia
 
-# Solo crypto — activos con pipeline tecnico completo
 ACTIVOS = ["BTCUSDT", "ETHUSDT", "SOLUSDT", "BNBUSDT"]
+
+DEFAULTS = {
+    "tecnico":     {"tabla": [], "señales_fuertes": [], "onchain": {}, "decisiones": "SIN_SEÑALES_FUERTES", "modelo": "fallback"},
+    "avanzado":    {"tabla": [], "señales_fuertes": [], "decisiones": "SIN_SEÑALES_AVANZADAS", "modelo": "fallback"},
+    "estrategias": {"resultados": [], "señales_fuertes": [], "decisiones": "SIN_SEÑALES_ESTRATEGIAS", "modelo": "fallback"},
+    "contexto":    {"sesgo_contexto": "NEUTRAL", "confianza_contexto": 50, "fear_greed": {},
+                    "wti_precio": 0, "wti_cambio": 0, "analisis_consolidado": "Sin datos",
+                    "estac_señal": "NEUTRAL", "pcr_btc": 1.0, "maxpain_btc": "N/A"},
+}
 
 async def ejecutar_ciclo_maestro() -> dict:
     inicio    = datetime.now()
@@ -26,28 +34,47 @@ async def ejecutar_ciclo_maestro() -> dict:
     horario = debe_operar()
     if not horario["operar"]:
         print(f"[MAESTRO] Fuera de horario: {horario['razon']}")
-        return {"timestamp": timestamp, "operar": False, "razon": horario["razon"], "decisiones": []}
+        return {
+            "timestamp": timestamp, "operar": False,
+            "razon": horario["razon"], "decisiones": [],
+            "tabla_maestra": [], "señales_fuertes": [],
+            "señales_aprobadas": [], "ordenes_ejecutadas": [],
+        }
 
     print(f"[MAESTRO] Horario: {horario.get('razon','N/A')} | Score: {horario.get('score','N/A')}/10")
-
     print("\n[MAESTRO] Ejecutando todos los ciclos en paralelo...")
-    ciclo_basico, ciclo_avanzado, ciclo_estrategias, ciclo_contexto = await asyncio.gather(
+
+    # return_exceptions=True — nunca lanza excepcion, devuelve error como valor
+    resultados = await asyncio.gather(
         ejecutar_ciclo_tecnico(),
         ejecutar_ciclo_avanzado(),
         ejecutar_ciclo_estrategias(),
         ejecutar_ciclo_contexto(),
+        return_exceptions=True
     )
 
-    print(f"[MAESTRO] Tecnico: {len(ciclo_basico['señales_fuertes'])} señales")
-    print(f"[MAESTRO] Avanzado: {len(ciclo_avanzado['señales_fuertes'])} señales")
-    print(f"[MAESTRO] Estrategias: {len(ciclo_estrategias['señales_fuertes'])} señales")
-    print(f"[MAESTRO] Contexto: {ciclo_contexto['sesgo_contexto']} | F&G={ciclo_contexto['fear_greed'].get('valor_hoy','N/A')}")
+    # Valida cada resultado — usa defaults si hubo error
+    ciclo_basico      = resultados[0] if not isinstance(resultados[0], Exception) else DEFAULTS["tecnico"]
+    ciclo_avanzado    = resultados[1] if not isinstance(resultados[1], Exception) else DEFAULTS["avanzado"]
+    ciclo_estrategias = resultados[2] if not isinstance(resultados[2], Exception) else DEFAULTS["estrategias"]
+    ciclo_contexto    = resultados[3] if not isinstance(resultados[3], Exception) else DEFAULTS["contexto"]
+
+    # Reporta errores sin crashear
+    for nombre, res in [("tecnico", resultados[0]), ("avanzado", resultados[1]),
+                        ("estrategias", resultados[2]), ("contexto", resultados[3])]:
+        if isinstance(res, Exception):
+            print(f"[MAESTRO] Error en {nombre}: {res}")
+
+    print(f"[MAESTRO] Tecnico: {len(ciclo_basico.get('señales_fuertes', []))} señales")
+    print(f"[MAESTRO] Avanzado: {len(ciclo_avanzado.get('señales_fuertes', []))} señales")
+    print(f"[MAESTRO] Estrategias: {len(ciclo_estrategias.get('señales_fuertes', []))} señales")
+    print(f"[MAESTRO] Contexto: {ciclo_contexto.get('sesgo_contexto','N/A')} | F&G={ciclo_contexto.get('fear_greed',{}).get('valor_hoy','N/A')}")
 
     tabla_maestra = []
     for simbolo in ACTIVOS:
-        basico     = next((t for t in ciclo_basico["tabla"]           if t.get("simbolo") == simbolo), {})
-        avanzado   = next((t for t in ciclo_avanzado["tabla"]         if t.get("simbolo") == simbolo), {})
-        estrategia = next((t for t in ciclo_estrategias["resultados"] if t.get("simbolo") == simbolo), {})
+        basico     = next((t for t in ciclo_basico.get("tabla", [])           if t.get("simbolo") == simbolo), {})
+        avanzado   = next((t for t in ciclo_avanzado.get("tabla", [])         if t.get("simbolo") == simbolo), {})
+        estrategia = next((t for t in ciclo_estrategias.get("resultados", []) if t.get("simbolo") == simbolo), {})
 
         señal_basico     = basico.get("señal_final", "ESPERAR")
         señal_avanzado   = avanzado.get("señal_final", "ESPERAR")
@@ -131,7 +158,6 @@ async def ejecutar_ciclo_maestro() -> dict:
             "take_profit_2":    take_profit2,
         })
 
-    # Umbral subido a 80% para mayor precision
     señales_fuertes = [
         t for t in tabla_maestra
         if t["confluencia"] in ["MUY_ALTA", "ALTA"] and t["confianza_final"] >= 80
@@ -142,18 +168,18 @@ async def ejecutar_ciclo_maestro() -> dict:
     señales_para_riesgo = []
     for s in señales_fuertes:
         señales_para_riesgo.append({
-            "simbolo":         s["simbolo"],
-            "señal_final":     s["señal_maestra"],
-            "señal_basico":    s["señal_basico"],
-            "señal_avanzado":  s["señal_avanzado"],
-            "señal_estrategia":s["señal_estrategia"],
-            "sesgo_contexto":  s["sesgo_contexto"],
-            "precio":          s["precio"],
-            "stop_loss":       s["stop_loss"],
-            "take_profit_1":   s["take_profit_1"],
-            "take_profit_2":   s["take_profit_2"],
-            "confianza_final": s["confianza_final"],
-            "confluencia":     s["confluencia"],
+            "simbolo":          s["simbolo"],
+            "señal_final":      s["señal_maestra"],
+            "señal_basico":     s["señal_basico"],
+            "señal_avanzado":   s["señal_avanzado"],
+            "señal_estrategia": s["señal_estrategia"],
+            "sesgo_contexto":   s["sesgo_contexto"],
+            "precio":           s["precio"],
+            "stop_loss":        s["stop_loss"],
+            "take_profit_1":    s["take_profit_1"],
+            "take_profit_2":    s["take_profit_2"],
+            "confianza_final":  s["confianza_final"],
+            "confluencia":      s["confluencia"],
         })
 
     resultado_riesgo  = await ejecutar_digestor_riesgo(
@@ -169,20 +195,20 @@ async def ejecutar_ciclo_maestro() -> dict:
         f"estrategia={t['señal_estrategia']} contexto={t['sesgo_contexto']} | "
         f"precio={t['precio']} SL={t['stop_loss']} TP1={t['take_profit_1']} TP2={t['take_profit_2']}"
         for t in tabla_maestra
-    ])
+    ]) if tabla_maestra else "Sin datos disponibles"
 
     resumen_contexto = f"""
 CONTEXTO GLOBAL:
-Fear & Greed: {ciclo_contexto['fear_greed'].get('valor_hoy','N/A')} ({ciclo_contexto['fear_greed'].get('clasificacion','N/A')})
-Sesgo mercado: {ciclo_contexto['sesgo_contexto']} | Confianza: {ciclo_contexto['confianza_contexto']}%
-WTI Petroleo: ${ciclo_contexto['wti_precio']} ({ciclo_contexto['wti_cambio']}% hoy)
-Analisis: {ciclo_contexto['analisis_consolidado'][:300]}
+Fear & Greed: {ciclo_contexto.get('fear_greed',{}).get('valor_hoy','N/A')} ({ciclo_contexto.get('fear_greed',{}).get('clasificacion','N/A')})
+Sesgo mercado: {ciclo_contexto.get('sesgo_contexto','N/A')} | Confianza: {ciclo_contexto.get('confianza_contexto','N/A')}%
+WTI Petroleo: ${ciclo_contexto.get('wti_precio','N/A')} ({ciclo_contexto.get('wti_cambio','N/A')}% hoy)
+Analisis: {ciclo_contexto.get('analisis_consolidado','Sin datos')[:300]}
 """
 
     print("[MAESTRO] Generando decision maestra con IA...")
     respuesta = await chat(
         mensajes=[{"role": "user", "content": f"TABLA MAESTRA:\n{resumen_tabla}\n\n{resumen_contexto}\n\nSEÑALES APROBADAS POR RIESGO: {len(señales_aprobadas)}"}],
-        system="Eres el cerebro maestro de un sistema de trading algoritmico profesional. Recibes analisis de 4 sistemas: 1.TECNICO BASICO: velas+indicadores+orderflow+niveles+onchain 2.TECNICO AVANZADO: funding+liquidaciones+estructura+volume_profile 3.ESTRATEGIAS: ORB+VWAP+Gap+MeanReversion+NewsMomentum+VIX+Arbitraje 4.CONTEXTO: sentimiento+macro+fundamental+historico+petroleo+trends+estacionalidad+opciones. Prioriza señales donde al menos 3 sistemas coinciden. El contexto actua como filtro — mercado bajista evita compras. Entrega SOLO decisiones con confluencia MUY_ALTA o ALTA y confianza MAYOR A 80%. Formato: DECISION_MAESTRA_N: - ACCION: COMPRAR o VENDER - SIMBOLO: nombre - PRECIO_ENTRADA: numero - STOP_LOSS: numero - TAKE_PROFIT_1: numero (ratio minimo 2:1) - TAKE_PROFIT_2: numero (ratio minimo 3:1) - CONFIANZA_SISTEMA: porcentaje - SISTEMAS_CONFIRMACION: cuales sistemas confirman - RAZON_MAESTRA: dos oraciones - HORIZONTE: timeframe - PRIORIDAD: 1 a 3. Si no hay señales: SISTEMA_EN_ESPERA. Responde en español sin texto adicional.",
+        system="Eres el cerebro maestro de un sistema de trading algoritmico profesional. Recibes analisis de 4 sistemas: 1.TECNICO BASICO: velas+indicadores+orderflow+niveles+onchain 2.TECNICO AVANZADO: funding+liquidaciones+estructura+volume_profile 3.ESTRATEGIAS: ORB+VWAP+Gap+MeanReversion+NewsMomentum+VIX+Arbitraje 4.CONTEXTO: sentimiento+macro+fundamental+historico+petroleo+trends+estacionalidad+opciones. Prioriza señales donde al menos 3 sistemas coinciden. El contexto actua como filtro — mercado bajista evita compras. Entrega SOLO decisiones con confluencia MUY_ALTA o ALTA y confianza MAYOR A 80%. Formato: DECISION_MAESTRA_N: - ACCION: COMPRAR o VENDER - SIMBOLO: nombre - PRECIO_ENTRADA: numero - STOP_LOSS: numero - TAKE_PROFIT_1: numero (ratio minimo 2:1) - TAKE_PROFIT_2: numero (ratio minimo 3:1) - CONFIANZA_SISTEMA: porcentaje - SISTEMAS_CONFIRMACION: cuales sistemas confirman - RAZON_MAESTRA: dos oraciones con niveles especificos - HORIZONTE: timeframe - PRIORIDAD: 1 a 3. Si no hay señales: SISTEMA_EN_ESPERA. Responde en español sin texto adicional.",
         max_tokens=1000
     )
 
@@ -216,6 +242,7 @@ Analisis: {ciclo_contexto['analisis_consolidado'][:300]}
 
     return {
         "timestamp":          timestamp,
+        "operar":             True,
         "duracion_segundos":  round(duracion, 1),
         "horario":            horario,
         "tabla_maestra":      tabla_maestra,
