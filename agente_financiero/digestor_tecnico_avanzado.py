@@ -16,20 +16,32 @@ async def ejecutar_ciclo_avanzado() -> dict:
     timestamp = datetime.now().strftime("%H:%M:%S")
     print(f"\n[digestor_avanzado] Ciclo avanzado {timestamp}")
 
-    # Corre los 4 agentes en paralelo
+    # Inicializa tabla antes del gather — evita NameError si gather falla
+    tabla           = []
+    señales_fuertes = []
+
     print("[1/4] Analizando funding rate y OI...")
     print("[2/4] Analizando liquidaciones y long/short...")
     print("[3/4] Analizando estructura de mercado...")
     print("[4/4] Calculando volume profile...")
 
-    funding, liquidaciones, estructura, vp = await asyncio.gather(
-        asyncio.to_thread(analizar_funding_completo),
-        asyncio.to_thread(analizar_liquidaciones_completo),
-        asyncio.to_thread(analizar_estructura_completo),
-        asyncio.to_thread(analizar_volume_profile_completo),
-    )
+    try:
+        funding, liquidaciones, estructura, vp = await asyncio.gather(
+            asyncio.to_thread(analizar_funding_completo),
+            asyncio.to_thread(analizar_liquidaciones_completo),
+            asyncio.to_thread(analizar_estructura_completo),
+            asyncio.to_thread(analizar_volume_profile_completo),
+        )
+    except Exception as e:
+        print(f"[digestor_avanzado] Error en gather: {e}")
+        return {
+            "timestamp":       timestamp,
+            "tabla":           tabla,
+            "señales_fuertes": señales_fuertes,
+            "decisiones":      "SIN_SEÑALES_AVANZADAS",
+            "modelo":          "fallback",
+        }
 
-    tabla = []
     for simbolo in ACTIVOS:
         f = next((x for x in funding       if x.get("simbolo") == simbolo), {})
         l = next((x for x in liquidaciones if x.get("simbolo") == simbolo), {})
@@ -116,7 +128,6 @@ async def ejecutar_ciclo_avanzado() -> dict:
             "zona_liq_abajo":   zona_liq_ab,
         })
 
-    # Umbral 80% consistente con el resto del sistema
     señales_fuertes = [
         t for t in tabla
         if t["confluencia"] in ["ALTA", "MUY_ALTA"] and t["confianza"] >= 80
@@ -129,13 +140,13 @@ async def ejecutar_ciclo_avanzado() -> dict:
         f"estructura={t['estructura']} BOS={t['bos']} CHoCH={t['choch']} | "
         f"POC={t['poc']} VAH={t['vah']} VAL={t['val']}"
         for t in tabla
-    ])
+    ]) if tabla else "Sin datos disponibles"
 
     print("[digestor_avanzado] Generando analisis con IA...")
     respuesta = await chat(
         mensajes=[{"role": "user", "content": f"ANALISIS TECNICO AVANZADO:\n{resumen}"}],
         system="""Eres el digestor tecnico avanzado de un sistema de trading profesional.
-Recibes datos de funding rate, liquidaciones, estructura de mercado y volume profile.
+Recibes datos de funding rate, liquidaciones, estructura de mercado y volume profile de BTC ETH SOL BNB.
 Entrega decisiones SOLO para señales con confluencia ALTA o MUY_ALTA y confianza mayor a 80%.
 Formato:
 DECISION_N:
@@ -147,7 +158,7 @@ DECISION_N:
 - TAKE_PROFIT_2: zona liquidez arriba (ratio 3:1)
 - CONFIANZA: porcentaje
 - FUENTES: funding+liquidaciones+estructura+vp que confirman
-- RAZON: una oracion
+- RAZON: una oracion especifica con los niveles clave
 - HORIZONTE: 15min o 1hora o 4horas
 Si no hay señales: SIN_SEÑALES_AVANZADAS
 Responde en español sin texto adicional.""",
