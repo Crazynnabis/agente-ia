@@ -1,120 +1,221 @@
 # agente_financiero/agente_google_trends.py
+# Reemplaza Google Trends con CoinGecko — sin bloqueos, gratis, más relevante
 import os
 import sys
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
-import pandas as pd
-import numpy as np
+import requests
 import time
 from datetime import datetime
-from pytrends.request import TrendReq
 
-# Cache global — 4 horas, Google Trends cambia muy lento
+# Cache global — 4 horas
 _cache_trends = {}
 _cache_ts     = {}
 TTL_TRENDS    = 14400  # 4 horas
 
-# Solo 3 simbolos clave para ser rapido
-KEYWORDS_MAP = {
-    "BTCUSDT": ["Bitcoin", "buy Bitcoin"],
-    "ETHUSDT": ["Ethereum", "buy Ethereum"],
-    "SOLUSDT": ["Solana", "SOL crypto"],
+# Mapeo de símbolos a IDs de CoinGecko
+COINGECKO_MAP = {
+    "BTCUSDT": "bitcoin",
+    "ETHUSDT": "ethereum",
+    "SOLUSDT": "solana",
+    "BNBUSDT": "binancecoin",
 }
 
-def obtener_tendencias_cached(simbolo: str, keywords: list) -> pd.DataFrame:
-    ahora = time.time()
+HEADERS = {"accept": "application/json"}
 
-    # Cache hit — no hace request
+def obtener_datos_coingecko(coin_id: str) -> dict:
+    """Obtiene datos de mercado, tendencias y sentimiento de CoinGecko."""
+    try:
+        # Datos de mercado — precio, volumen, cambios, sentiment
+        url = f"https://api.coingecko.com/api/v3/coins/{coin_id}"
+        params = {
+            "localization":          "false",
+            "tickers":               "false",
+            "market_data":           "true",
+            "community_data":        "true",
+            "developer_data":        "false",
+            "sparkline":             "false",
+        }
+        r = requests.get(url, params=params, headers=HEADERS, timeout=15)
+        if r.status_code == 429:
+            print(f"[agente_trends] CoinGecko rate limit — usando cache")
+            return {}
+        if r.status_code != 200:
+            return {}
+        return r.json()
+    except Exception as e:
+        print(f"[agente_trends] Error CoinGecko {coin_id}: {e}")
+        return {}
+
+def obtener_trending_coingecko() -> list:
+    """Obtiene las monedas trending en CoinGecko en las últimas 24h."""
+    try:
+        r = requests.get(
+            "https://api.coingecko.com/api/v3/search/trending",
+            headers=HEADERS, timeout=10
+        )
+        if r.status_code != 200:
+            return []
+        data  = r.json()
+        coins = data.get("coins", [])
+        return [c["item"]["id"] for c in coins]
+    except:
+        return []
+
+def analizar_tendencia_activo(simbolo: str) -> dict:
+    """
+    Analiza tendencia de un activo usando CoinGecko.
+    Misma interfaz que Google Trends para compatibilidad.
+    """
+    coin_id = COINGECKO_MAP.get(simbolo)
+    if not coin_id:
+        return {
+            "simbolo": simbolo, "señal": "ESPERAR",
+            "fuerza": "baja", "razon": "Sin mapeo CoinGecko",
+            "error": True,
+        }
+
+    print(f"[agente_trends] Analizando {simbolo} via CoinGecko...")
+
+    # Cache hit
+    ahora = time.time()
     if simbolo in _cache_trends and (ahora - _cache_ts.get(simbolo, 0)) < TTL_TRENDS:
         print(f"[agente_trends] Cache hit {simbolo}")
         return _cache_trends[simbolo]
 
-    try:
-        time.sleep(1)  # Reducido de 2s a 1s
-        pytrends = TrendReq(hl="en-US", tz=360, timeout=(5, 15))
-        pytrends.build_payload(keywords[:2], cat=0, timeframe="today 1-m", geo="", gprop="")
-        df = pytrends.interest_over_time()
-        if "isPartial" in df.columns:
-            df = df.drop(columns=["isPartial"])
-        if not df.empty:
-            _cache_trends[simbolo] = df
-            _cache_ts[simbolo]     = ahora
-        return df
-    except Exception as e:
-        print(f"[agente_trends] Error {simbolo}: {e}")
-        return pd.DataFrame()
-
-def analizar_tendencia_activo(simbolo: str) -> dict:
-    keywords          = KEYWORDS_MAP.get(simbolo, [simbolo])
-    keyword_principal = keywords[0]
-
-    print(f"[agente_trends] Analizando {simbolo}...")
-    df = obtener_tendencias_cached(simbolo, keywords)
-
-    if df.empty or keyword_principal not in df.columns:
+    datos = obtener_datos_coingecko(coin_id)
+    if not datos:
+        # Devuelve cache anterior si existe
+        if simbolo in _cache_trends:
+            print(f"[agente_trends] Sin datos nuevos — usando cache anterior {simbolo}")
+            return _cache_trends[simbolo]
         return {
-            "simbolo": simbolo,
-            "señal":   "ESPERAR",
-            "fuerza":  "baja",
-            "razon":   "Sin datos de trends",
-            "error":   True,
+            "simbolo": simbolo, "señal": "ESPERAR",
+            "fuerza": "baja", "razon": "Sin datos CoinGecko",
+            "promedio": 0, "valor_actual": 0,
+            "error": True,
         }
 
-    serie        = df[keyword_principal]
-    valor_actual = float(serie.iloc[-1])
-    valor_semana = float(serie.iloc[-2]) if len(serie) > 1 else valor_actual
-    promedio     = float(serie.mean())
-    maximo       = float(serie.max())
+    # Extrae métricas de mercado
+    market      = datos.get("market_data", {})
+    community   = datos.get("community_data", {})
+    sentiment   = datos.get("sentiment_votes_up_percentage", 50) or 50
 
-    cambio_semana = round(((valor_actual - valor_semana) / valor_semana * 100), 2) if valor_semana > 0 else 0
-    vs_promedio   = round(((valor_actual - promedio) / promedio * 100), 2) if promedio > 0 else 0
+    cambio_1h   = market.get("price_change_percentage_1h_in_currency",  {}).get("usd", 0) or 0
+    cambio_24h  = market.get("price_change_percentage_24h_in_currency", {}).get("usd", 0) or 0
+    cambio_7d   = market.get("price_change_percentage_7d_in_currency",  {}).get("usd", 0) or 0
+    volumen_24h = market.get("total_volume",    {}).get("usd", 0) or 0
+    vol_cambio  = market.get("market_cap_change_percentage_24h", 0) or 0
+    precio      = market.get("current_price",   {}).get("usd", 0) or 0
+    ath_pct     = market.get("ath_change_percentage", {}).get("usd", 0) or 0
 
-    ultimas_4 = serie.tail(4).values
-    momentum  = round(float(np.polyfit(range(len(ultimas_4)), ultimas_4, 1)[0]), 3) if len(ultimas_4) >= 2 else 0
+    # Reddit / community como proxy de interés
+    reddit_subs     = community.get("reddit_subscribers", 0) or 0
+    twitter_follows = community.get("twitter_followers",  0) or 0
 
-    señal  = "ESPERAR"
-    fuerza = "baja"
-    razon  = "Sin señal clara"
+    # Verifica si está en trending
+    trending_ids = obtener_trending_coingecko()
+    en_trending  = coin_id in trending_ids
 
-    if valor_actual > promedio * 1.5 and momentum > 0:
+    # ── Lógica de señal ──────────────────────────────────────
+    puntos_compra = 0
+    puntos_venta  = 0
+    razones       = []
+
+    # Momentum de precio
+    if cambio_1h > 1.5:
+        puntos_compra += 2
+        razones.append(f"momentum 1h +{cambio_1h:.1f}%")
+    elif cambio_1h < -1.5:
+        puntos_venta += 2
+        razones.append(f"momentum 1h {cambio_1h:.1f}%")
+
+    if cambio_24h > 3:
+        puntos_compra += 2
+        razones.append(f"sube {cambio_24h:.1f}% en 24h")
+    elif cambio_24h < -3:
+        puntos_venta += 2
+        razones.append(f"cae {cambio_24h:.1f}% en 24h")
+
+    if cambio_7d > 10:
+        puntos_compra += 1
+        razones.append(f"tendencia 7d +{cambio_7d:.1f}%")
+    elif cambio_7d < -10:
+        puntos_venta += 1
+        razones.append(f"tendencia 7d {cambio_7d:.1f}%")
+
+    # Sentimiento de la comunidad
+    if sentiment > 70:
+        puntos_compra += 1
+        razones.append(f"sentimiento alcista {sentiment:.0f}%")
+    elif sentiment < 35:
+        puntos_venta += 1
+        razones.append(f"sentimiento bajista {sentiment:.0f}%")
+
+    # Trending en CoinGecko
+    if en_trending:
+        puntos_compra += 2
+        razones.append("en trending CoinGecko")
+
+    # Volumen anormal
+    if vol_cambio > 20:
+        puntos_compra += 1
+        razones.append(f"volumen cap +{vol_cambio:.1f}%")
+    elif vol_cambio < -20:
+        puntos_venta += 1
+        razones.append(f"volumen cap {vol_cambio:.1f}%")
+
+    # ── Determina señal final ────────────────────────────────
+    if puntos_compra >= 4:
         señal  = "COMPRAR"
         fuerza = "alta"
-        razon  = f"Busquedas {vs_promedio}% sobre promedio con momentum positivo"
-    elif valor_actual > promedio * 1.2 and cambio_semana > 10:
+    elif puntos_compra >= 2:
         señal  = "COMPRAR"
         fuerza = "media"
-        razon  = f"Busquedas en aumento +{cambio_semana}% esta semana"
-    elif valor_actual < promedio * 0.7 and momentum < 0:
+    elif puntos_venta >= 4:
+        señal  = "VENDER"
+        fuerza = "alta"
+    elif puntos_venta >= 2:
         señal  = "VENDER"
         fuerza = "media"
-        razon  = f"Busquedas {vs_promedio}% bajo promedio"
-    elif cambio_semana < -20:
-        señal  = "VENDER"
-        fuerza = "media"
-        razon  = f"Caida brusca -{abs(cambio_semana)}% esta semana"
-
-    if valor_actual >= maximo * 0.9 and señal == "COMPRAR":
-        señal  = "PRECAUCION"
+    else:
+        señal  = "ESPERAR"
         fuerza = "baja"
-        razon += " — cerca del maximo historico"
 
-    return {
+    razon = " | ".join(razones) if razones else "Sin señal clara"
+
+    resultado = {
         "simbolo":       simbolo,
-        "keyword":       keyword_principal,
-        "valor_actual":  round(valor_actual, 1),
-        "promedio":      round(promedio, 1),
-        "maximo":        round(maximo, 1),
-        "cambio_semana": cambio_semana,
-        "vs_promedio":   vs_promedio,
-        "momentum":      momentum,
+        "coin_id":       coin_id,
         "señal":         señal,
         "fuerza":        fuerza,
         "razon":         razon,
+        "valor_actual":  round(cambio_24h, 2),   # compatibilidad con digestor_contexto
+        "promedio":      round(cambio_7d, 2),     # compatibilidad con digestor_contexto
+        "cambio_1h":     round(cambio_1h, 2),
+        "cambio_24h":    round(cambio_24h, 2),
+        "cambio_7d":     round(cambio_7d, 2),
+        "sentimiento":   round(sentiment, 1),
+        "en_trending":   en_trending,
+        "volumen_24h":   volumen_24h,
+        "precio":        precio,
+        "ath_pct":       round(ath_pct, 1),
+        "puntos_compra": puntos_compra,
+        "puntos_venta":  puntos_venta,
         "timestamp":     datetime.now().strftime("%H:%M:%S"),
+        "error":         False,
     }
 
+    # Guarda en cache
+    _cache_trends[simbolo] = resultado
+    _cache_ts[simbolo]     = ahora
+
+    return resultado
+
 def ejecutar_google_trends() -> list:
+    """Mantiene el nombre para compatibilidad — usa CoinGecko internamente."""
     resultados = []
-    for simbolo in KEYWORDS_MAP.keys():
+    for simbolo in COINGECKO_MAP.keys():
+        time.sleep(1)  # Respeta rate limit de CoinGecko free tier
         r = analizar_tendencia_activo(simbolo)
         resultados.append(r)
     return resultados
@@ -126,7 +227,7 @@ def obtener_reporte_trends() -> str:
         if r.get("señal") not in ["ESPERAR", None] and not r.get("error"):
             lineas.append(
                 f"{r['simbolo']}: {r['señal']} ({r['fuerza']}) | "
-                f"valor={r['valor_actual']} vs prom={r['promedio']} | "
-                f"semana={r['cambio_semana']}% | {r['razon']}"
+                f"1h={r['cambio_1h']:+.1f}% 24h={r['cambio_24h']:+.1f}% 7d={r['cambio_7d']:+.1f}% | "
+                f"sentiment={r['sentimiento']}% | {r['razon']}"
             )
-    return "\n".join(lineas) if lineas else "Sin señales de Google Trends"
+    return "\n".join(lineas) if lineas else "Sin señales de tendencia"
