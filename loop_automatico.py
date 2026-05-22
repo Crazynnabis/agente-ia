@@ -53,6 +53,7 @@ _estado = {
     "ciclo_1h":              0,
     "ciclo_15m":             0,
     "ciclo_2m":              0,
+    "noticias_alertas":      [],  # noticias de alto impacto
 }
 
 gestor = GestorRiesgo()
@@ -118,7 +119,7 @@ def calcular_atr_multiplier() -> float:
     else:         return 2.5
 
 # ============================================================
-# LOOP 4H — CONTEXTO MACRO
+# LOOP 4H — CONTEXTO MACRO + NOTICIAS RSS
 # ============================================================
 async def loop_4h():
     while True:
@@ -135,24 +136,61 @@ async def loop_4h():
             from agente_financiero.agente_estacionalidad import analizar_estacionalidad_completo
             from agente_financiero.agente_historico import analizar_historico_completo
             from agente_financiero.agente_fundamental import analizar_fundamental_completo
+            from agente_financiero.agente_noticias_rss import ejecutar_agente_noticias
 
-            trends, estac, hist, fund = await asyncio.gather(
+            resultados = await asyncio.gather(
                 asyncio.wait_for(asyncio.to_thread(ejecutar_google_trends), timeout=120),
                 asyncio.to_thread(analizar_estacionalidad_completo),
                 analizar_historico_completo(),
                 analizar_fundamental_completo(),
+                asyncio.to_thread(ejecutar_agente_noticias),
+                return_exceptions=True
             )
 
-            estac_señal = estac.get("señal_estacional", "NEUTRAL")
-            estac_conf  = estac.get("confianza", 50)
+            trends   = resultados[0] if not isinstance(resultados[0], Exception) else []
+            estac    = resultados[1] if not isinstance(resultados[1], Exception) else {}
+            hist     = resultados[2] if not isinstance(resultados[2], Exception) else {}
+            fund     = resultados[3] if not isinstance(resultados[3], Exception) else {}
+            noticias = resultados[4] if not isinstance(resultados[4], Exception) else []
+
+            # Reporta errores sin crashear
+            for i, (nombre, res) in enumerate([
+                ("trends", resultados[0]), ("estac", resultados[1]),
+                ("hist", resultados[2]), ("fund", resultados[3]),
+                ("noticias", resultados[4])
+            ]):
+                if isinstance(res, Exception):
+                    print(f"[4H] Error en {nombre}: {res}")
+
+            estac_señal = estac.get("señal_estacional", "NEUTRAL") if isinstance(estac, dict) else "NEUTRAL"
+            estac_conf  = estac.get("confianza", 50) if isinstance(estac, dict) else 50
+
+            # Noticias de alto impacto — alerta inmediata por Telegram
+            alertas_noticias = [n for n in noticias if isinstance(n, dict) and n.get("impacto", 0) >= 6]
+            for alerta in alertas_noticias:
+                emoji = "🟢" if alerta.get("señal") == "COMPRAR" else "🔴"
+                enviar_mensaje(
+                    f"📰 <b>NOTICIA ALTO IMPACTO</b> {emoji}\n"
+                    f"Activo: {alerta.get('simbolo', 'N/A')}\n"
+                    f"Señal: {alerta.get('señal', 'N/A')}\n"
+                    f"📌 {alerta.get('titulo_top', 'Sin título')}\n"
+                    f"Fuente: {alerta.get('fuente_top', 'N/A')}\n"
+                    f"Impacto: {alerta.get('impacto', 0)}/10"
+                )
+
+            # Resumen de noticias en log
+            noticias_con_señal = [n for n in noticias if isinstance(n, dict) and n.get("señal") != "ESPERAR"]
+            print(f"[4H] Noticias: {len(noticias)} activos | {len(noticias_con_señal)} con señal | {len(alertas_noticias)} alto impacto")
 
             with _lock_estado:
-                _estado["estac_señal"]    = estac_señal
-                _estado["contexto_macro"] = {
+                _estado["estac_señal"]      = estac_señal
+                _estado["noticias_alertas"] = alertas_noticias
+                _estado["contexto_macro"]   = {
                     "trends":      trends,
                     "estacional":  estac,
-                    "historico":   hist.get("analisis", ""),
-                    "fundamental": fund.get("analisis", ""),
+                    "historico":   hist.get("analisis", "") if isinstance(hist, dict) else "",
+                    "fundamental": fund.get("analisis", "") if isinstance(fund, dict) else "",
+                    "noticias":    noticias,
                 }
                 _estado["contexto_ts"] = time.time()
 
@@ -160,11 +198,12 @@ async def loop_4h():
             enviar_mensaje(
                 f"📊 <b>Contexto macro actualizado</b>\n"
                 f"Estacionalidad: {estac_señal} ({estac_conf}%)\n"
+                f"Noticias relevantes: {len(noticias_con_señal)}\n"
                 f"Hora: {datetime.now().strftime('%H:%M:%S')}"
             )
 
         except asyncio.TimeoutError:
-            print(f"[4H] Google Trends timeout — continuando sin trends")
+            print(f"[4H] Timeout — continuando con datos parciales")
         except Exception as e:
             print(f"[4H] Error: {e}")
             enviar_mensaje(f"⚠️ Error loop 4h: {str(e)[:100]}")
@@ -204,10 +243,27 @@ async def loop_1h():
             opciones_señal = opciones_btc.get("señal", "ESPERAR")
             estac_señal    = get_estado("estac_señal") or "NEUTRAL"
 
-            puntos_alcista = sum([fg_valor > 60, fg_valor > 50 and fg_valor <= 60,
-                                  wti_cambio < -2, "ALCISTA" in estac_señal, opciones_señal == "COMPRAR"])
-            puntos_bajista = sum([fg_valor < 40, fg_valor >= 40 and fg_valor < 50,
-                                  wti_cambio > 2, "BAJISTA" in estac_señal, opciones_señal == "VENDER"])
+            # Incorpora señal de noticias al sesgo
+            noticias_alertas = get_estado("noticias_alertas") or []
+            noticias_compra  = sum(1 for n in noticias_alertas if n.get("señal") == "COMPRAR")
+            noticias_venta   = sum(1 for n in noticias_alertas if n.get("señal") == "VENDER")
+
+            puntos_alcista = sum([
+                fg_valor > 60,
+                fg_valor > 50 and fg_valor <= 60,
+                wti_cambio < -2,
+                "ALCISTA" in estac_señal,
+                opciones_señal == "COMPRAR",
+                noticias_compra > noticias_venta,  # noticias favorables
+            ])
+            puntos_bajista = sum([
+                fg_valor < 40,
+                fg_valor >= 40 and fg_valor < 50,
+                wti_cambio > 2,
+                "BAJISTA" in estac_señal,
+                opciones_señal == "VENDER",
+                noticias_venta > noticias_compra,  # noticias desfavorables
+            ])
 
             sesgo         = "ALCISTA" if puntos_alcista > puntos_bajista else (
                             "BAJISTA" if puntos_bajista > puntos_alcista else "NEUTRAL")
@@ -336,7 +392,6 @@ async def loop_2m():
             print(f"[2M] Ciclo #{ciclo} — {datetime.now().strftime('%H:%M:%S')} | Sesgo={sesgo_ctx}")
 
             # ── Protección de capital ─────────────────────────────
-            # Cierre automático si pérdida > 5%
             try:
                 cerradas = await asyncio.to_thread(monitorear_perdidas_excesivas)
                 for c in cerradas:
@@ -347,7 +402,6 @@ async def loop_2m():
                         f"Pérdida: {c['pnl_pct']:.2f}% (${c['pnl_usd']:.2f})\n"
                         f"Razón: supera límite del 5%"
                     )
-                    # Registra como pérdida para blacklist
                     if registrar_resultado(c['simbolo'], False):
                         agregar_blacklist(c['simbolo'])
             except Exception as e:
@@ -368,7 +422,6 @@ async def loop_2m():
                 return_exceptions=True
             )
 
-            # Defaults si algún agente falla
             if isinstance(velas_res, Exception): velas_res = {"oportunidades": [], "alertas": []}
             if isinstance(ind_res,   Exception): ind_res   = []
             if isinstance(of_res,    Exception): of_res    = []
@@ -401,6 +454,15 @@ async def loop_2m():
                 fund       = next((f for f in fund_res if f.get("simbolo") == simbolo), {})
                 señal_fund = fund.get("accion", "ESPERAR")
 
+                # Boost de confianza si hay noticia de alto impacto alineada
+                noticias_alertas = get_estado("noticias_alertas") or []
+                noticia_alineada = next(
+                    (n for n in noticias_alertas
+                     if simbolo in n.get("simbolo", "") and n.get("señal") == señal_ind),
+                    None
+                )
+                boost_noticia = 5 if noticia_alineada else 0
+
                 votos = sum([
                     señal_velas == señal_ind and señal_ind != "ESPERAR",
                     señal_of    == señal_ind and señal_ind != "ESPERAR",
@@ -425,8 +487,9 @@ async def loop_2m():
                 if cantidad <= 0:
                     continue
 
-                confianza_final = min(confianza + (votos * 5), 99)
-                print(f"[2M] SEÑAL: {simbolo} {señal_ind} conf={confianza_final}% votos={votos}")
+                confianza_final = min(confianza + (votos * 5) + boost_noticia, 99)
+                razon_noticia   = f" | 📰 {noticia_alineada['titulo_top'][:50]}" if noticia_alineada else ""
+                print(f"[2M] SEÑAL: {simbolo} {señal_ind} conf={confianza_final}% votos={votos}{' +noticia' if noticia_alineada else ''}")
 
                 orden = ejecutar_orden(
                     simbolo=simbolo, accion=señal_ind,
@@ -440,7 +503,7 @@ async def loop_2m():
                         simbolo=simbolo, accion=señal_ind,
                         precio=precio, sl=sl, tp1=tp1,
                         confianza=confianza_final,
-                        razon=f"Loop 2m — {votos} fuentes | ATR {atr_mult}x | {sesgo_ctx}",
+                        razon=f"Loop 2m — {votos} fuentes | ATR {atr_mult}x | {sesgo_ctx}{razon_noticia}",
                         horizonte="2min"
                     )
                     if registrar_resultado(simbolo, False):
@@ -459,14 +522,15 @@ async def loop_2m():
 async def main():
     print(f"\n{'='*60}")
     print(f"SISTEMA DE TRADING IA — ARQUITECTURA MULTI-LOOP")
-    print(f"Loop 4h: macro | Loop 1h: sentimiento | Loop 15m: tecnico | Loop 2m: ejecucion")
+    print(f"Loop 4h: macro + noticias | Loop 1h: sentimiento")
+    print(f"Loop 15m: tecnico | Loop 2m: ejecucion + proteccion")
     print(f"{'='*60}")
 
     enviado = enviar_mensaje(
         f"🤖 <b>Sistema Trading IA iniciado</b>\n"
         f"Arquitectura: 4h | 1h | 15m | 2m\n"
-        f"Fallback numérico: activo | Blacklist: activa\n"
-        f"Stop loss dinámico + Cierre automático >5%\n"
+        f"Noticias RSS: CoinDesk + Reuters + CoinTelegraph\n"
+        f"Cierre automático >5% activo\n"
         f"Hora: {datetime.now().strftime('%H:%M:%S')}"
     )
     print(f"[main] Telegram: {'OK' if enviado else 'ERROR'}")
