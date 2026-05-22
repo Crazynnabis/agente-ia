@@ -54,6 +54,8 @@ _estado = {
     "ciclo_15m":             0,
     "ciclo_2m":              0,
     "noticias_alertas":      [],  # noticias de alto impacto
+    "dxy_señal":             "ESPERAR",  # señal correlación BTC/DXY
+    "dxy_datos":             {},
 }
 
 gestor = GestorRiesgo()
@@ -153,19 +155,15 @@ async def loop_4h():
             fund     = resultados[3] if not isinstance(resultados[3], Exception) else {}
             noticias = resultados[4] if not isinstance(resultados[4], Exception) else []
 
-            # Reporta errores sin crashear
-            for i, (nombre, res) in enumerate([
-                ("trends", resultados[0]), ("estac", resultados[1]),
-                ("hist", resultados[2]), ("fund", resultados[3]),
-                ("noticias", resultados[4])
-            ]):
+            for nombre, res in [("trends", resultados[0]), ("estac", resultados[1]),
+                                 ("hist", resultados[2]), ("fund", resultados[3]),
+                                 ("noticias", resultados[4])]:
                 if isinstance(res, Exception):
                     print(f"[4H] Error en {nombre}: {res}")
 
             estac_señal = estac.get("señal_estacional", "NEUTRAL") if isinstance(estac, dict) else "NEUTRAL"
             estac_conf  = estac.get("confianza", 50) if isinstance(estac, dict) else 50
 
-            # Noticias de alto impacto — alerta inmediata por Telegram
             alertas_noticias = [n for n in noticias if isinstance(n, dict) and n.get("impacto", 0) >= 6]
             for alerta in alertas_noticias:
                 emoji = "🟢" if alerta.get("señal") == "COMPRAR" else "🔴"
@@ -178,7 +176,6 @@ async def loop_4h():
                     f"Impacto: {alerta.get('impacto', 0)}/10"
                 )
 
-            # Resumen de noticias en log
             noticias_con_señal = [n for n in noticias if isinstance(n, dict) and n.get("señal") != "ESPERAR"]
             print(f"[4H] Noticias: {len(noticias)} activos | {len(noticias_con_señal)} con señal | {len(alertas_noticias)} alto impacto")
 
@@ -211,7 +208,7 @@ async def loop_4h():
         await asyncio.sleep(4 * 3600)
 
 # ============================================================
-# LOOP 1H — SENTIMIENTO Y MACRO
+# LOOP 1H — SENTIMIENTO, MACRO Y CORRELACIÓN BTC/DXY
 # ============================================================
 async def loop_1h():
     await asyncio.sleep(30)
@@ -227,23 +224,42 @@ async def loop_1h():
             from agente_financiero.agente_macro import analizar_contexto_macro
             from agente_financiero.agente_petroleo import analizar_petroleo_completo
             from agente_financiero.agente_opciones import analizar_opciones_completo
+            from agente_financiero.agente_correlacion_dxy import analizar_correlacion_dxy
 
-            sent, macro, petro, opciones = await asyncio.gather(
+            sent, macro, petro, opciones, dxy = await asyncio.gather(
                 analizar_sentimiento_mercado(),
                 analizar_contexto_macro(),
                 analizar_petroleo_completo(),
                 asyncio.to_thread(analizar_opciones_completo),
+                asyncio.to_thread(analizar_correlacion_dxy),
+                return_exceptions=True
             )
 
-            fg_valor       = sent.get("fear_greed", {}).get("valor_hoy", 50)
-            wti            = petro.get("precios", {}).get("WTI", {}).get("precio", 0)
-            wti_cambio     = petro.get("precios", {}).get("WTI", {}).get("cambio_dia", 0)
-            opciones_btc   = next((o for o in opciones if o.get("moneda") == "BTC"), {})
+            # Defaults si algún agente falla
+            if isinstance(sent,    Exception): sent    = {}
+            if isinstance(macro,   Exception): macro   = {}
+            if isinstance(petro,   Exception): petro   = {}
+            if isinstance(opciones,Exception): opciones= []
+            if isinstance(dxy,     Exception): dxy     = {"señal": "ESPERAR", "error": True}
+
+            fg_valor       = sent.get("fear_greed", {}).get("valor_hoy", 50) if isinstance(sent, dict) else 50
+            wti            = petro.get("precios", {}).get("WTI", {}).get("precio", 0) if isinstance(petro, dict) else 0
+            wti_cambio     = petro.get("precios", {}).get("WTI", {}).get("cambio_dia", 0) if isinstance(petro, dict) else 0
+            opciones_lista = opciones if isinstance(opciones, list) else []
+            opciones_btc   = next((o for o in opciones_lista if o.get("moneda") == "BTC"), {})
             pcr_btc        = opciones_btc.get("pcr_volumen", 1.0)
             opciones_señal = opciones_btc.get("señal", "ESPERAR")
             estac_señal    = get_estado("estac_señal") or "NEUTRAL"
 
-            # Incorpora señal de noticias al sesgo
+            # Señal DXY
+            dxy_señal      = dxy.get("señal", "ESPERAR") if isinstance(dxy, dict) else "ESPERAR"
+            dxy_actual     = dxy.get("dxy_actual", 0) if isinstance(dxy, dict) else 0
+            dxy_cambio_1h  = dxy.get("dxy_cambio_1h", 0) if isinstance(dxy, dict) else 0
+            correlacion    = dxy.get("correlacion", 0) if isinstance(dxy, dict) else 0
+
+            print(f"[1H] DXY={dxy_actual:.2f} ({dxy_cambio_1h:+.2f}% 1h) | Corr={correlacion:.2f} | Señal={dxy_señal}")
+
+            # Incorpora señales de noticias y DXY al sesgo
             noticias_alertas = get_estado("noticias_alertas") or []
             noticias_compra  = sum(1 for n in noticias_alertas if n.get("señal") == "COMPRAR")
             noticias_venta   = sum(1 for n in noticias_alertas if n.get("señal") == "VENDER")
@@ -254,7 +270,8 @@ async def loop_1h():
                 wti_cambio < -2,
                 "ALCISTA" in estac_señal,
                 opciones_señal == "COMPRAR",
-                noticias_compra > noticias_venta,  # noticias favorables
+                noticias_compra > noticias_venta,
+                dxy_señal == "COMPRAR",  # DXY baja → BTC sube
             ])
             puntos_bajista = sum([
                 fg_valor < 40,
@@ -262,7 +279,8 @@ async def loop_1h():
                 wti_cambio > 2,
                 "BAJISTA" in estac_señal,
                 opciones_señal == "VENDER",
-                noticias_venta > noticias_compra,  # noticias desfavorables
+                noticias_venta > noticias_compra,
+                dxy_señal == "VENDER",  # DXY sube → BTC baja
             ])
 
             sesgo         = "ALCISTA" if puntos_alcista > puntos_bajista else (
@@ -276,8 +294,10 @@ async def loop_1h():
                 _estado["wti_precio"]         = wti
                 _estado["pcr_btc"]            = pcr_btc
                 _estado["volatilidad_alta"]   = fg_valor < 25 or fg_valor > 80
+                _estado["dxy_señal"]          = dxy_señal
+                _estado["dxy_datos"]          = dxy if isinstance(dxy, dict) else {}
 
-            print(f"[1H] F&G={fg_valor} | Sesgo={sesgo} ({confianza_ctx}%) | WTI=${wti} | PCR={pcr_btc}")
+            print(f"[1H] F&G={fg_valor} | Sesgo={sesgo} ({confianza_ctx}%) | WTI=${wti} | PCR={pcr_btc} | DXY={dxy_señal}")
 
         except Exception as e:
             print(f"[1H] Error: {e}")
@@ -340,7 +360,6 @@ async def loop_15m():
                     stats = obtener_estadisticas_dia()
                     alerta_resumen_dia(stats)
 
-            # Acciones NYSE si está abierto
             if es_horario_mercado():
                 print(f"[15M] NYSE abierto — analizando acciones...")
                 try:
@@ -388,8 +407,9 @@ async def loop_2m():
 
             sesgo_ctx = get_estado("sesgo_contexto") or "NEUTRAL"
             atr_mult  = calcular_atr_multiplier()
+            dxy_señal = get_estado("dxy_señal") or "ESPERAR"
 
-            print(f"[2M] Ciclo #{ciclo} — {datetime.now().strftime('%H:%M:%S')} | Sesgo={sesgo_ctx}")
+            print(f"[2M] Ciclo #{ciclo} — {datetime.now().strftime('%H:%M:%S')} | Sesgo={sesgo_ctx} | DXY={dxy_señal}")
 
             # ── Protección de capital ─────────────────────────────
             try:
@@ -407,7 +427,6 @@ async def loop_2m():
             except Exception as e:
                 print(f"[2M] Error monitor pérdidas: {e}")
 
-            # Trailing stop
             try:
                 await asyncio.to_thread(monitorear_y_ejecutar_trailing)
             except Exception as e:
@@ -454,7 +473,7 @@ async def loop_2m():
                 fund       = next((f for f in fund_res if f.get("simbolo") == simbolo), {})
                 señal_fund = fund.get("accion", "ESPERAR")
 
-                # Boost de confianza si hay noticia de alto impacto alineada
+                # Boost por noticia alineada
                 noticias_alertas = get_estado("noticias_alertas") or []
                 noticia_alineada = next(
                     (n for n in noticias_alertas
@@ -462,6 +481,12 @@ async def loop_2m():
                     None
                 )
                 boost_noticia = 5 if noticia_alineada else 0
+
+                # Boost por DXY alineado con señal (solo BTCUSDT)
+                boost_dxy = 0
+                if simbolo == "BTCUSDT" and dxy_señal == señal_ind and dxy_señal != "ESPERAR":
+                    boost_dxy = 5
+                    print(f"[2M] DXY confirma señal {señal_ind} para BTCUSDT")
 
                 votos = sum([
                     señal_velas == señal_ind and señal_ind != "ESPERAR",
@@ -487,9 +512,13 @@ async def loop_2m():
                 if cantidad <= 0:
                     continue
 
-                confianza_final = min(confianza + (votos * 5) + boost_noticia, 99)
-                razon_noticia   = f" | 📰 {noticia_alineada['titulo_top'][:50]}" if noticia_alineada else ""
-                print(f"[2M] SEÑAL: {simbolo} {señal_ind} conf={confianza_final}% votos={votos}{' +noticia' if noticia_alineada else ''}")
+                confianza_final = min(confianza + (votos * 5) + boost_noticia + boost_dxy, 99)
+                extras = []
+                if noticia_alineada: extras.append(f"📰 {noticia_alineada['titulo_top'][:40]}")
+                if boost_dxy > 0:   extras.append(f"💵 DXY confirma")
+                razon_extra = " | " + " | ".join(extras) if extras else ""
+
+                print(f"[2M] SEÑAL: {simbolo} {señal_ind} conf={confianza_final}% votos={votos}{' +DXY' if boost_dxy else ''}{' +noticia' if boost_noticia else ''}")
 
                 orden = ejecutar_orden(
                     simbolo=simbolo, accion=señal_ind,
@@ -503,7 +532,7 @@ async def loop_2m():
                         simbolo=simbolo, accion=señal_ind,
                         precio=precio, sl=sl, tp1=tp1,
                         confianza=confianza_final,
-                        razon=f"Loop 2m — {votos} fuentes | ATR {atr_mult}x | {sesgo_ctx}{razon_noticia}",
+                        razon=f"Loop 2m — {votos} fuentes | ATR {atr_mult}x | {sesgo_ctx}{razon_extra}",
                         horizonte="2min"
                     )
                     if registrar_resultado(simbolo, False):
@@ -522,14 +551,14 @@ async def loop_2m():
 async def main():
     print(f"\n{'='*60}")
     print(f"SISTEMA DE TRADING IA — ARQUITECTURA MULTI-LOOP")
-    print(f"Loop 4h: macro + noticias | Loop 1h: sentimiento")
+    print(f"Loop 4h: macro + noticias | Loop 1h: sentimiento + DXY")
     print(f"Loop 15m: tecnico | Loop 2m: ejecucion + proteccion")
     print(f"{'='*60}")
 
     enviado = enviar_mensaje(
         f"🤖 <b>Sistema Trading IA iniciado</b>\n"
         f"Arquitectura: 4h | 1h | 15m | 2m\n"
-        f"Noticias RSS: CoinDesk + Reuters + CoinTelegraph\n"
+        f"Noticias RSS + Correlación BTC/DXY activos\n"
         f"Cierre automático >5% activo\n"
         f"Hora: {datetime.now().strftime('%H:%M:%S')}"
     )
