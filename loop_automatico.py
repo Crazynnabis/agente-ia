@@ -10,7 +10,7 @@ from dotenv import load_dotenv
 load_dotenv(r'C:\Users\Oscar Hernandez\.env', override=True)
 sys.path.insert(0, r'C:\Users\Oscar Hernandez\agente-ia')
 
-from datetime import datetime
+from datetime import datetime, timezone
 from supabase import create_client
 from agente_financiero.digestor_maestro import ejecutar_ciclo_maestro
 from agente_financiero.digestor_acciones import ejecutar_ciclo_acciones, es_horario_mercado
@@ -53,9 +53,10 @@ _estado = {
     "ciclo_1h":              0,
     "ciclo_15m":             0,
     "ciclo_2m":              0,
-    "noticias_alertas":      [],  # noticias de alto impacto
-    "dxy_señal":             "ESPERAR",  # señal correlación BTC/DXY
+    "noticias_alertas":      [],
+    "dxy_señal":             "ESPERAR",
     "dxy_datos":             {},
+    "modo_conservador":      False,  # activo entre 00:00-08:00 UTC
 }
 
 gestor = GestorRiesgo()
@@ -97,13 +98,51 @@ def registrar_resultado(simbolo: str, ganancia: bool) -> bool:
                 return True
     return False
 
+def evaluar_modo_conservador():
+    """
+    Activa modo conservador entre 00:00 y 08:00 UTC.
+    Baja liquidez, spreads amplios, mayor riesgo de manipulación.
+    Notifica por Telegram cuando cambia el modo.
+    """
+    hora_utc       = datetime.now(timezone.utc).hour
+    conservador    = hora_utc < 8  # 00:00 - 07:59 UTC
+    anterior       = get_estado("modo_conservador")
+
+    if conservador != anterior:
+        set_estado("modo_conservador", conservador)
+        if conservador:
+            print(f"[modo] 🌙 Modo CONSERVADOR activado — hora UTC={hora_utc}")
+            enviar_mensaje(
+                f"🌙 <b>Modo conservador activado</b>\n"
+                f"Hora UTC: {hora_utc:02d}:00\n"
+                f"Posiciones reducidas al 50%\n"
+                f"Umbral confianza: 88% mínimo\n"
+                f"Votos requeridos: 3 de 3"
+            )
+        else:
+            print(f"[modo] ☀️ Modo NORMAL activado — hora UTC={hora_utc}")
+            enviar_mensaje(
+                f"☀️ <b>Modo normal activado</b>\n"
+                f"Hora UTC: {hora_utc:02d}:00\n"
+                f"Parámetros normales restaurados"
+            )
+
+    return conservador
+
 def calcular_cantidad_por_confianza(confianza: float, precio: float, stop_loss: float) -> float:
-    portafolio = obtener_portafolio()
-    capital    = portafolio.get("capital_total", 100000)
+    portafolio    = obtener_portafolio()
+    capital       = portafolio.get("capital_total", 100000)
+    conservador   = get_estado("modo_conservador")
+
     if confianza >= 95:   pct_riesgo = 0.015
     elif confianza >= 90: pct_riesgo = 0.012
     elif confianza >= 85: pct_riesgo = 0.010
     else:                 pct_riesgo = 0.005
+
+    # Modo conservador — reduce posiciones al 50%
+    if conservador:
+        pct_riesgo *= 0.5
+
     riesgo_usd   = capital * pct_riesgo
     distancia_sl = abs(precio - stop_loss)
     if distancia_sl == 0:
@@ -114,11 +153,32 @@ def calcular_cantidad_por_confianza(confianza: float, precio: float, stop_loss: 
     return round(cantidad, 6)
 
 def calcular_atr_multiplier() -> float:
-    fg = get_estado("fear_greed") or 50
-    if fg < 20:   return 3.5
-    elif fg < 35: return 3.0
-    elif fg > 75: return 3.0
-    else:         return 2.5
+    fg          = get_estado("fear_greed") or 50
+    conservador = get_estado("modo_conservador")
+
+    if fg < 20:   mult = 3.5
+    elif fg < 35: mult = 3.0
+    elif fg > 75: mult = 3.0
+    else:         mult = 2.5
+
+    # Modo conservador — stop más ancho para sobrevivir volatilidad nocturna
+    if conservador:
+        mult += 0.5
+
+    return mult
+
+def obtener_parametros_ejecucion() -> dict:
+    """
+    Retorna los parámetros de ejecución según el modo actual.
+    Normal: confianza 80%, votos 2
+    Conservador: confianza 88%, votos 3
+    """
+    conservador = get_estado("modo_conservador")
+    return {
+        "confianza_minima": 88 if conservador else 80,
+        "votos_minimos":    3  if conservador else 2,
+        "conservador":      conservador,
+    }
 
 # ============================================================
 # LOOP 4H — CONTEXTO MACRO + NOTICIAS RSS
@@ -235,7 +295,6 @@ async def loop_1h():
                 return_exceptions=True
             )
 
-            # Defaults si algún agente falla
             if isinstance(sent,    Exception): sent    = {}
             if isinstance(macro,   Exception): macro   = {}
             if isinstance(petro,   Exception): petro   = {}
@@ -251,15 +310,13 @@ async def loop_1h():
             opciones_señal = opciones_btc.get("señal", "ESPERAR")
             estac_señal    = get_estado("estac_señal") or "NEUTRAL"
 
-            # Señal DXY
-            dxy_señal      = dxy.get("señal", "ESPERAR") if isinstance(dxy, dict) else "ESPERAR"
-            dxy_actual     = dxy.get("dxy_actual", 0) if isinstance(dxy, dict) else 0
-            dxy_cambio_1h  = dxy.get("dxy_cambio_1h", 0) if isinstance(dxy, dict) else 0
-            correlacion    = dxy.get("correlacion", 0) if isinstance(dxy, dict) else 0
+            dxy_señal     = dxy.get("señal", "ESPERAR") if isinstance(dxy, dict) else "ESPERAR"
+            dxy_actual    = dxy.get("dxy_actual", 0) if isinstance(dxy, dict) else 0
+            dxy_cambio_1h = dxy.get("dxy_cambio_1h", 0) if isinstance(dxy, dict) else 0
+            correlacion   = dxy.get("correlacion", 0) if isinstance(dxy, dict) else 0
 
             print(f"[1H] DXY={dxy_actual:.2f} ({dxy_cambio_1h:+.2f}% 1h) | Corr={correlacion:.2f} | Señal={dxy_señal}")
 
-            # Incorpora señales de noticias y DXY al sesgo
             noticias_alertas = get_estado("noticias_alertas") or []
             noticias_compra  = sum(1 for n in noticias_alertas if n.get("señal") == "COMPRAR")
             noticias_venta   = sum(1 for n in noticias_alertas if n.get("señal") == "VENDER")
@@ -271,7 +328,7 @@ async def loop_1h():
                 "ALCISTA" in estac_señal,
                 opciones_señal == "COMPRAR",
                 noticias_compra > noticias_venta,
-                dxy_señal == "COMPRAR",  # DXY baja → BTC sube
+                dxy_señal == "COMPRAR",
             ])
             puntos_bajista = sum([
                 fg_valor < 40,
@@ -280,7 +337,7 @@ async def loop_1h():
                 "BAJISTA" in estac_señal,
                 opciones_señal == "VENDER",
                 noticias_venta > noticias_compra,
-                dxy_señal == "VENDER",  # DXY sube → BTC baja
+                dxy_señal == "VENDER",
             ])
 
             sesgo         = "ALCISTA" if puntos_alcista > puntos_bajista else (
@@ -405,11 +462,15 @@ async def loop_2m():
                 await asyncio.sleep(2 * 60)
                 continue
 
-            sesgo_ctx = get_estado("sesgo_contexto") or "NEUTRAL"
-            atr_mult  = calcular_atr_multiplier()
-            dxy_señal = get_estado("dxy_señal") or "ESPERAR"
+            # Evalúa modo conservador cada ciclo
+            conservador = evaluar_modo_conservador()
+            params      = obtener_parametros_ejecucion()
+            sesgo_ctx   = get_estado("sesgo_contexto") or "NEUTRAL"
+            atr_mult    = calcular_atr_multiplier()
+            dxy_señal   = get_estado("dxy_señal") or "ESPERAR"
 
-            print(f"[2M] Ciclo #{ciclo} — {datetime.now().strftime('%H:%M:%S')} | Sesgo={sesgo_ctx} | DXY={dxy_señal}")
+            modo_txt = "🌙 CONSERVADOR" if conservador else "☀️ NORMAL"
+            print(f"[2M] Ciclo #{ciclo} — {datetime.now().strftime('%H:%M:%S')} | {modo_txt} | Sesgo={sesgo_ctx} | DXY={dxy_señal}")
 
             # ── Protección de capital ─────────────────────────────
             try:
@@ -482,7 +543,7 @@ async def loop_2m():
                 )
                 boost_noticia = 5 if noticia_alineada else 0
 
-                # Boost por DXY alineado con señal (solo BTCUSDT)
+                # Boost por DXY alineado (solo BTCUSDT)
                 boost_dxy = 0
                 if simbolo == "BTCUSDT" and dxy_señal == señal_ind and dxy_señal != "ESPERAR":
                     boost_dxy = 5
@@ -494,7 +555,8 @@ async def loop_2m():
                     señal_fund  == señal_ind and señal_ind != "ESPERAR",
                 ])
 
-                if votos < 2 or confianza < 80:
+                # Usa parámetros del modo actual
+                if votos < params["votos_minimos"] or confianza < params["confianza_minima"]:
                     continue
                 if sesgo_ctx == "BAJISTA" and señal_ind == "COMPRAR":
                     continue
@@ -515,10 +577,11 @@ async def loop_2m():
                 confianza_final = min(confianza + (votos * 5) + boost_noticia + boost_dxy, 99)
                 extras = []
                 if noticia_alineada: extras.append(f"📰 {noticia_alineada['titulo_top'][:40]}")
-                if boost_dxy > 0:   extras.append(f"💵 DXY confirma")
+                if boost_dxy > 0:    extras.append("💵 DXY confirma")
+                if conservador:      extras.append("🌙 modo conservador")
                 razon_extra = " | " + " | ".join(extras) if extras else ""
 
-                print(f"[2M] SEÑAL: {simbolo} {señal_ind} conf={confianza_final}% votos={votos}{' +DXY' if boost_dxy else ''}{' +noticia' if boost_noticia else ''}")
+                print(f"[2M] SEÑAL: {simbolo} {señal_ind} conf={confianza_final}% votos={votos}{' +DXY' if boost_dxy else ''}{' +noticia' if boost_noticia else ''}{' 🌙' if conservador else ''}")
 
                 orden = ejecutar_orden(
                     simbolo=simbolo, accion=señal_ind,
@@ -559,7 +622,7 @@ async def main():
         f"🤖 <b>Sistema Trading IA iniciado</b>\n"
         f"Arquitectura: 4h | 1h | 15m | 2m\n"
         f"Noticias RSS + Correlación BTC/DXY activos\n"
-        f"Cierre automático >5% activo\n"
+        f"Cierre automático >5% + Modo conservador nocturno\n"
         f"Hora: {datetime.now().strftime('%H:%M:%S')}"
     )
     print(f"[main] Telegram: {'OK' if enviado else 'ERROR'}")
