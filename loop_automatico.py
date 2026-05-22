@@ -22,7 +22,10 @@ from agente_financiero.agente_indicadores import analizar_indicadores_completo
 from agente_financiero.agente_orderflow import analizar_todos_activos
 from agente_financiero.agente_funding import analizar_funding_completo
 from agente_financiero.gestion_riesgo import GestorRiesgo
-from agente_financiero.ejecutor_alpaca import ejecutar_orden, obtener_posiciones, obtener_portafolio
+from agente_financiero.ejecutor_alpaca import (
+    ejecutar_orden, obtener_posiciones, obtener_portafolio,
+    monitorear_perdidas_excesivas, monitorear_y_ejecutar_trailing
+)
 from agente_financiero.telegram_comandos import escuchar_comandos
 
 ACTIVOS_CRYPTO = ["BTCUSDT", "ETHUSDT", "SOLUSDT", "BNBUSDT"]
@@ -254,13 +257,11 @@ async def loop_15m():
 
             resultado = await ejecutar_ciclo_maestro()
 
-            # Siempre inicializa estas variables para evitar NameError
-            tabla_maestra  = resultado.get("tabla_maestra", [])
-            señales_f      = resultado.get("señales_fuertes", [])
-            señales        = resultado.get("señales_aprobadas", [])
-            ordenes_e      = resultado.get("ordenes_ejecutadas", [])
+            tabla_maestra = resultado.get("tabla_maestra", [])
+            señales_f     = resultado.get("señales_fuertes", [])
+            señales       = resultado.get("señales_aprobadas", [])
+            ordenes_e     = resultado.get("ordenes_ejecutadas", [])
 
-            # Solo procesa si el maestro aprobó operar
             if resultado.get("operar", True):
                 with _lock_estado:
                     _estado["tabla_maestra"]   = tabla_maestra
@@ -303,7 +304,6 @@ async def loop_15m():
             print(f"[15M] Error ciclo #{ciclo}: {e}")
             enviar_mensaje(f"⚠️ Error loop 15m #{ciclo}: {str(e)[:100]}")
 
-        # Ping Supabase cada 5 días
         if ciclo % 480 == 0:
             try:
                 sb = create_client(os.getenv("SUPABASE_URL"), os.getenv("SUPABASE_KEY"))
@@ -315,7 +315,7 @@ async def loop_15m():
         await asyncio.sleep(15 * 60)
 
 # ============================================================
-# LOOP 2MIN — SEÑALES URGENTES Y EJECUCIÓN
+# LOOP 2MIN — SEÑALES URGENTES, EJECUCIÓN Y PROTECCIÓN
 # ============================================================
 async def loop_2m():
     await asyncio.sleep(120)
@@ -335,12 +335,44 @@ async def loop_2m():
 
             print(f"[2M] Ciclo #{ciclo} — {datetime.now().strftime('%H:%M:%S')} | Sesgo={sesgo_ctx}")
 
+            # ── Protección de capital ─────────────────────────────
+            # Cierre automático si pérdida > 5%
+            try:
+                cerradas = await asyncio.to_thread(monitorear_perdidas_excesivas)
+                for c in cerradas:
+                    print(f"[2M] ⛔ Cierre forzado {c['simbolo']} — pérdida {c['pnl_pct']:.2f}%")
+                    enviar_mensaje(
+                        f"⛔ <b>Cierre automático</b>\n"
+                        f"Símbolo: {c['simbolo']}\n"
+                        f"Pérdida: {c['pnl_pct']:.2f}% (${c['pnl_usd']:.2f})\n"
+                        f"Razón: supera límite del 5%"
+                    )
+                    # Registra como pérdida para blacklist
+                    if registrar_resultado(c['simbolo'], False):
+                        agregar_blacklist(c['simbolo'])
+            except Exception as e:
+                print(f"[2M] Error monitor pérdidas: {e}")
+
+            # Trailing stop
+            try:
+                await asyncio.to_thread(monitorear_y_ejecutar_trailing)
+            except Exception as e:
+                print(f"[2M] Error trailing: {e}")
+
+            # ── Señales urgentes ──────────────────────────────────
             velas_res, ind_res, of_res, fund_res = await asyncio.gather(
                 analizar_oportunidades(),
                 asyncio.to_thread(analizar_indicadores_completo),
                 asyncio.to_thread(analizar_todos_activos, ACTIVOS_CRYPTO),
                 asyncio.to_thread(analizar_funding_completo),
+                return_exceptions=True
             )
+
+            # Defaults si algún agente falla
+            if isinstance(velas_res, Exception): velas_res = {"oportunidades": [], "alertas": []}
+            if isinstance(ind_res,   Exception): ind_res   = []
+            if isinstance(of_res,    Exception): of_res    = []
+            if isinstance(fund_res,  Exception): fund_res  = []
 
             posiciones_abiertas = obtener_posiciones()
 
@@ -349,8 +381,10 @@ async def loop_2m():
                 señal_ind = ind["señal"]
                 confianza = ind["confianza"]
                 precio    = ind["precio"]
-                atr       = ind["atr"]
+                atr       = ind.get("atr", {})
 
+                if not atr or not atr.get("atr"):
+                    continue
                 if esta_en_blacklist(simbolo):
                     continue
                 if any(simbolo in p["simbolo"] for p in posiciones_abiertas):
@@ -409,7 +443,6 @@ async def loop_2m():
                         razon=f"Loop 2m — {votos} fuentes | ATR {atr_mult}x | {sesgo_ctx}",
                         horizonte="2min"
                     )
-                    # Registra para blacklist
                     if registrar_resultado(simbolo, False):
                         agregar_blacklist(simbolo)
                 else:
@@ -433,7 +466,7 @@ async def main():
         f"🤖 <b>Sistema Trading IA iniciado</b>\n"
         f"Arquitectura: 4h | 1h | 15m | 2m\n"
         f"Fallback numérico: activo | Blacklist: activa\n"
-        f"Stop loss dinámico por Fear & Greed\n"
+        f"Stop loss dinámico + Cierre automático >5%\n"
         f"Hora: {datetime.now().strftime('%H:%M:%S')}"
     )
     print(f"[main] Telegram: {'OK' if enviado else 'ERROR'}")

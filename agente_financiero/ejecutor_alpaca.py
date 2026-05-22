@@ -11,7 +11,6 @@ from agente_financiero.logger_trading import log_orden, log_cierre
 from agente_financiero.alertas_telegram import alerta_orden_ejecutada, alerta_cierre
 from agente_financiero.trailing_stop import gestor_trailing
 
-# Carga credenciales
 load_dotenv(r'C:\Users\Oscar Hernandez\.env', override=True)
 load_dotenv(override=False)
 
@@ -27,6 +26,9 @@ SIMBOLO_MAP = {
     "SPY":     "SPY",
     "QQQ":     "QQQ",
 }
+
+# Umbral de pérdida máxima antes de cierre forzado
+PERDIDA_MAXIMA_PCT = -5.0
 
 def obtener_cliente():
     try:
@@ -94,7 +96,6 @@ def ejecutar_orden(simbolo: str, accion: str, cantidad: float,
 
         print(f"[alpaca] Ejecutando {accion} {cantidad} {simbolo_alpaca}...")
 
-        # Verifica posiciones antes de vender
         if accion == "VENDER":
             posiciones = obtener_posiciones()
             pos_actual = next((p for p in posiciones if simbolo in p["simbolo"] or simbolo_alpaca in p["simbolo"]), None)
@@ -156,11 +157,12 @@ def cerrar_posicion(simbolo: str, razon: str = "señal de cierre") -> dict:
         if not cliente:
             return {"error": "Sin conexion"}
 
-        simbolo_alpaca = SIMBOLO_MAP.get(simbolo, simbolo)
-        cliente.close_position(simbolo_alpaca)
-
+        # Obtiene datos antes de cerrar para el log
         posiciones = obtener_posiciones()
         pos        = next((p for p in posiciones if simbolo in p["simbolo"]), None)
+
+        simbolo_alpaca = SIMBOLO_MAP.get(simbolo, simbolo)
+        cliente.close_position(simbolo_alpaca)
 
         if pos:
             log_cierre(
@@ -186,6 +188,38 @@ def cerrar_posicion(simbolo: str, razon: str = "señal de cierre") -> dict:
     except Exception as e:
         print(f"[alpaca] Error cerrando posicion: {e}")
         return {"error": str(e)}
+
+def monitorear_perdidas_excesivas() -> list:
+    """
+    Revisa todas las posiciones abiertas y cierra automáticamente
+    las que superen PERDIDA_MAXIMA_PCT aunque no hayan tocado el stop loss.
+    Corre cada 2 minutos desde loop_2m.
+    """
+    cerradas = []
+    try:
+        posiciones = obtener_posiciones()
+        for pos in posiciones:
+            pnl_pct  = pos["pnl_pct"]
+            simbolo  = pos["simbolo"]
+            pnl_usd  = pos["pnl_usd"]
+
+            if pnl_pct <= PERDIDA_MAXIMA_PCT:
+                print(f"[alpaca] ⚠️ {simbolo} caída {pnl_pct:.2f}% — cierre forzado por pérdida excesiva")
+                resultado = cerrar_posicion(
+                    simbolo=simbolo,
+                    razon=f"Cierre automático — pérdida {pnl_pct:.2f}% supera límite {PERDIDA_MAXIMA_PCT}%"
+                )
+                if "error" not in resultado:
+                    cerradas.append({
+                        "simbolo": simbolo,
+                        "pnl_pct": pnl_pct,
+                        "pnl_usd": pnl_usd,
+                    })
+
+    except Exception as e:
+        print(f"[alpaca] Error monitoreando pérdidas: {e}")
+
+    return cerradas
 
 def monitorear_y_ejecutar_trailing() -> list:
     acciones = gestor_trailing.monitorear_todas()
