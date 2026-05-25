@@ -1,5 +1,5 @@
 # agente_financiero/agente_noticias_rss.py
-# Noticias en tiempo real via RSS — CoinDesk, Reuters, CoinTelegraph
+# Noticias en tiempo real via RSS — CoinDesk, CoinTelegraph, Decrypt, CNBC, MarketWatch
 # Sin API key, completamente gratis
 import os
 import sys
@@ -14,12 +14,13 @@ _cache_noticias = {}
 _cache_ts       = {}
 TTL_NOTICIAS    = 900  # 15 minutos
 
-# Feeds RSS gratuitos
+# Feeds RSS gratuitos — Reuters reemplazado por CNBC y MarketWatch
 RSS_FEEDS = {
-    "coindesk":     "https://www.coindesk.com/arc/outboundfeeds/rss/",
+    "coindesk":      "https://www.coindesk.com/arc/outboundfeeds/rss/",
     "cointelegraph": "https://cointelegraph.com/rss",
-    "reuters_biz":  "https://feeds.reuters.com/reuters/businessNews",
-    "decrypt":      "https://decrypt.co/feed",
+    "decrypt":       "https://decrypt.co/feed",
+    "cnbc_markets":  "https://search.cnbc.com/rs/search/combinedcms/view.xml?partnerId=wrss01&id=15839135",
+    "marketwatch":   "https://feeds.content.dowjones.io/public/rss/mw_realtimeheadlines",
 }
 
 # Palabras clave por activo
@@ -30,17 +31,27 @@ KEYWORDS_ACTIVOS = {
     "BNBUSDT": ["binance", "bnb", "cz", "changpeng"],
 }
 
+# Palabras clave macro — para detectar noticias que mueven todo el mercado
+KEYWORDS_MACRO = [
+    "fed", "federal reserve", "interest rate", "inflation", "cpi", "ppi",
+    "recession", "gdp", "unemployment", "jobs", "nfp", "fomc",
+    "treasury", "dollar", "tariff", "trade war", "sanctions",
+]
+
 # Palabras de alto impacto — mueven precio
 PALABRAS_ALCISTAS = [
     "surge", "rally", "soars", "jumps", "bull", "adoption",
     "etf", "approved", "partnership", "launch", "upgrade",
     "record", "ath", "institutional", "sube", "alcanza", "rompe",
-    "aprobado", "adopción", "récord",
+    "aprobado", "adopción", "récord", "rate cut", "dovish",
+    "stimulus", "bailout", "beats", "exceeds",
 ]
 PALABRAS_BAJISTAS = [
     "crash", "plunge", "falls", "drops", "ban", "hack", "exploit",
     "sec", "lawsuit", "fraud", "scam", "bear", "collapse", "dump",
     "prohibición", "hackeo", "demanda", "cae", "desplome", "prohíbe",
+    "rate hike", "hawkish", "misses", "below", "warning", "crisis",
+    "default", "bankruptcy", "contagion",
 ]
 
 HEADERS = {
@@ -52,13 +63,14 @@ def obtener_noticias_feed(nombre: str, url: str) -> list:
     try:
         r = requests.get(url, headers=HEADERS, timeout=10)
         if r.status_code != 200:
+            print(f"[agente_noticias] {nombre}: HTTP {r.status_code}")
             return []
 
         root  = ET.fromstring(r.content)
         items = root.findall(".//item")
         noticias = []
 
-        for item in items[:20]:  # Solo las 20 más recientes
+        for item in items[:20]:
             titulo  = item.findtext("title", "")
             link    = item.findtext("link", "")
             desc    = item.findtext("description", "")
@@ -68,11 +80,11 @@ def obtener_noticias_feed(nombre: str, url: str) -> list:
                 continue
 
             noticias.append({
-                "titulo":  titulo.strip(),
-                "link":    link.strip(),
-                "desc":    desc.strip()[:200],
-                "fecha":   pubdate.strip(),
-                "fuente":  nombre,
+                "titulo": titulo.strip(),
+                "link":   link.strip(),
+                "desc":   desc.strip()[:200],
+                "fecha":  pubdate.strip(),
+                "fuente": nombre,
             })
 
         return noticias
@@ -91,12 +103,16 @@ def analizar_impacto(titulo: str, desc: str) -> tuple:
     puntos_bajista = sum(1 for p in PALABRAS_BAJISTAS if p in texto)
 
     # Peso extra para palabras muy relevantes
-    if any(p in texto for p in ["etf approved", "sec approved", "institutional"]):
+    if any(p in texto for p in ["etf approved", "sec approved", "institutional", "rate cut"]):
         puntos_alcista += 3
-    if any(p in texto for p in ["sec lawsuit", "ban", "hack", "exploit", "fraud"]):
+    if any(p in texto for p in ["sec lawsuit", "ban", "hack", "exploit", "fraud", "rate hike", "bankruptcy"]):
         puntos_bajista += 3
 
-    impacto = min((puntos_alcista + puntos_bajista) * 2, 10)
+    # Noticias macro tienen impacto extra en todo el mercado
+    es_macro = any(kw in texto for kw in KEYWORDS_MACRO)
+    bonus_macro = 2 if es_macro else 0
+
+    impacto = min((puntos_alcista + puntos_bajista) * 2 + bonus_macro, 10)
 
     if puntos_alcista > puntos_bajista:
         señal = "COMPRAR"
@@ -112,23 +128,23 @@ def ejecutar_agente_noticias() -> list:
     Descarga noticias de todos los feeds, filtra por activo
     y calcula impacto. Resultado compatible con el sistema.
     """
-    ahora = time.time()
-
-    # Cache global de noticias
+    ahora     = time.time()
     cache_key = "todas"
+
     if cache_key in _cache_noticias and (ahora - _cache_ts.get(cache_key, 0)) < TTL_NOTICIAS:
-        print(f"[agente_noticias] Cache hit — {len(_cache_noticias[cache_key])} noticias")
+        print(f"[agente_noticias] Cache hit — {len(_cache_noticias[cache_key])} activos")
         return _cache_noticias[cache_key]
 
     print(f"[agente_noticias] Descargando feeds RSS...")
 
-    # Descarga todos los feeds
     todas_noticias = []
     for nombre, url in RSS_FEEDS.items():
         noticias = obtener_noticias_feed(nombre, url)
         todas_noticias.extend(noticias)
         print(f"[agente_noticias] {nombre}: {len(noticias)} noticias")
-        time.sleep(0.5)  # Respetuoso con los servidores
+        time.sleep(0.5)
+
+    print(f"[agente_noticias] Total: {len(todas_noticias)} noticias de {len(RSS_FEEDS)} fuentes")
 
     # Analiza impacto por activo
     resultados = []
@@ -145,13 +161,11 @@ def ejecutar_agente_noticias() -> list:
                     "señal":   señal,
                 })
 
-        # Ordena por impacto
         noticias_activo.sort(key=lambda x: x["impacto"], reverse=True)
 
-        # Calcula señal consolidada del activo
         if noticias_activo:
-            compras = sum(1 for n in noticias_activo if n["señal"] == "COMPRAR")
-            ventas  = sum(1 for n in noticias_activo if n["señal"] == "VENDER")
+            compras     = sum(1 for n in noticias_activo if n["señal"] == "COMPRAR")
+            ventas      = sum(1 for n in noticias_activo if n["señal"] == "VENDER")
             impacto_max = noticias_activo[0]["impacto"]
 
             if compras > ventas and impacto_max >= 4:
@@ -172,30 +186,26 @@ def ejecutar_agente_noticias() -> list:
             noticia_top = {}
 
         resultados.append({
-            "simbolo":       simbolo,
-            "señal":         señal_final,
-            "fuerza":        fuerza,
-            "impacto":       impacto_max,
-            "num_noticias":  len(noticias_activo),
-            "titulo_top":    noticia_top.get("titulo", "Sin noticias relevantes"),
-            "fuente_top":    noticia_top.get("fuente", ""),
-            "noticias":      noticias_activo[:5],  # Top 5
-            "timestamp":     datetime.now().strftime("%H:%M:%S"),
-            "error":         False,
+            "simbolo":      simbolo,
+            "señal":        señal_final,
+            "fuerza":       fuerza,
+            "impacto":      impacto_max,
+            "num_noticias": len(noticias_activo),
+            "titulo_top":   noticia_top.get("titulo", "Sin noticias relevantes"),
+            "fuente_top":   noticia_top.get("fuente", ""),
+            "noticias":     noticias_activo[:5],
+            "timestamp":    datetime.now().strftime("%H:%M:%S"),
+            "error":        False,
         })
 
         print(f"[agente_noticias] {simbolo}: {len(noticias_activo)} noticias | señal={señal_final}")
 
-    # Guarda en cache
     _cache_noticias[cache_key] = resultados
     _cache_ts[cache_key]       = ahora
 
     return resultados
 
 def obtener_alertas_criticas() -> list:
-    """
-    Retorna solo noticias con impacto alto (>=6) para alertas inmediatas.
-    Se puede llamar desde el loop_2m para alertas urgentes.
-    """
+    """Retorna solo noticias con impacto alto para alertas inmediatas."""
     resultados = ejecutar_agente_noticias()
     return [r for r in resultados if r["impacto"] >= 6 and r["señal"] != "ESPERAR"]
