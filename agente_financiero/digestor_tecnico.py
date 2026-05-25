@@ -17,7 +17,6 @@ async def ejecutar_ciclo_tecnico() -> dict:
     timestamp = datetime.now().strftime("%H:%M:%S")
     print(f"\n[digestor_tecnico] Ciclo tecnico {timestamp}")
 
-    # Inicializa siempre — evita NameError si cualquier agente falla
     tabla           = []
     señales_fuertes = []
 
@@ -169,7 +168,8 @@ DECISION_N:
 - HORIZONTE: 5min o 15min o 1hora
 Si no hay señales: SIN_SEÑALES_FUERTES
 Responde en español sin texto adicional.""",
-        max_tokens=600
+        max_tokens=600,
+        agente="digestor_tecnico"
     )
 
     return {

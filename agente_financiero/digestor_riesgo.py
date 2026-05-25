@@ -34,19 +34,16 @@ async def procesar_señal(señal: dict) -> dict:
         "riesgo":          {},
     }
 
-    # 1. Verificar horario
     horario = debe_operar()
     resultado["horario"] = horario
     if not horario["operar"]:
         resultado["razones_rechazo"].append(horario["razon"])
 
-    # 2. Filtrar por tendencia mayor
     filtro = filtrar_señal_por_tendencia(señal)
     resultado["tendencia"] = filtro
     if not filtro["aprobada"]:
         resultado["razones_rechazo"].append(filtro["razon"])
 
-    # 3. Validar riesgo y tamaño
     validacion = gestor.validar_señal(señal)
     resultado["riesgo"]          = validacion
     resultado["tamaño_posicion"] = validacion.get("tamaño", {})
@@ -56,12 +53,11 @@ async def procesar_señal(señal: dict) -> dict:
 
     resultado["aprobada_final"] = len(resultado["razones_rechazo"]) == 0
 
-    # Construye fuentes confirmacion
     fuentes_confirmacion = []
-    if señal.get("señal_basico")    != "ESPERAR": fuentes_confirmacion.append("tecnico")
-    if señal.get("señal_avanzado")  != "ESPERAR": fuentes_confirmacion.append("avanzado")
-    if señal.get("señal_estrategia")!= "ESPERAR": fuentes_confirmacion.append("estrategias")
-    if señal.get("sesgo_contexto")  != "NEUTRAL":  fuentes_confirmacion.append("contexto")
+    if señal.get("señal_basico")     != "ESPERAR": fuentes_confirmacion.append("tecnico")
+    if señal.get("señal_avanzado")   != "ESPERAR": fuentes_confirmacion.append("avanzado")
+    if señal.get("señal_estrategia") != "ESPERAR": fuentes_confirmacion.append("estrategias")
+    if señal.get("sesgo_contexto")   != "NEUTRAL":  fuentes_confirmacion.append("contexto")
     if not fuentes_confirmacion:
         fuentes_confirmacion = ["tecnico"]
 
@@ -87,7 +83,6 @@ async def ejecutar_digestor_riesgo(señales: list, sesgo_contexto: str = "NEUTRA
     timestamp = datetime.now().strftime("%H:%M:%S")
     print(f"\n[digestor_riesgo] Procesando {len(señales)} señales...")
 
-    # Verifica horario global
     horario = debe_operar()
     if not horario["operar"]:
         print(f"[digestor_riesgo] Fuera de horario: {horario['razon']}")
@@ -99,7 +94,6 @@ async def ejecutar_digestor_riesgo(señales: list, sesgo_contexto: str = "NEUTRA
             "señales_rechazadas": señales,
         }
 
-    # Verifica calendario economico
     calendario = analizar_calendario()
     if calendario["debe_pausar"]:
         print(f"[digestor_riesgo] PAUSA por calendario: {calendario['razon_pausa']}")
@@ -127,7 +121,6 @@ async def ejecutar_digestor_riesgo(señales: list, sesgo_contexto: str = "NEUTRA
 
         print(f"[digestor_riesgo] Procesando {señal.get('simbolo')}...")
 
-        # Filtro de contexto
         accion = señal.get("señal_final", "ESPERAR")
         if sesgo_contexto == "BAJISTA" and accion == "COMPRAR":
             print(f"  RECHAZADA por contexto BAJISTA")
@@ -148,7 +141,6 @@ async def ejecutar_digestor_riesgo(señales: list, sesgo_contexto: str = "NEUTRA
             razones = ', '.join(resultado['razones_rechazo'])
             print(f"  RECHAZADA: {razones}")
 
-    # Limita por horario
     max_ops = horario.get("max_operaciones", 2)
     if len(señales_aprobadas) > max_ops:
         señales_aprobadas = sorted(
@@ -158,7 +150,7 @@ async def ejecutar_digestor_riesgo(señales: list, sesgo_contexto: str = "NEUTRA
         )[:max_ops]
         print(f"[digestor_riesgo] Limitado a {max_ops} operaciones por horario")
 
-    # Resumen con IA
+    # Resumen con IA — agente prioritario
     if señales_aprobadas:
         resumen = "\n".join([
             f"{s['simbolo']}: {s['accion']} @ {s['precio']} | "
@@ -169,7 +161,8 @@ async def ejecutar_digestor_riesgo(señales: list, sesgo_contexto: str = "NEUTRA
         respuesta = await chat(
             mensajes=[{"role": "user", "content": f"Señales aprobadas:\n{resumen}\n\nDescribe en 2 oraciones el contexto tecnico."}],
             system="Eres un analista tecnico. Describe el contexto de las señales en español. Conciso.",
-            max_tokens=200
+            max_tokens=200,
+            agente="digestor_riesgo"
         )
         confirmacion = respuesta["texto"]
     else:
