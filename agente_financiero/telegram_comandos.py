@@ -13,8 +13,12 @@ TOKEN   = os.getenv("TELEGRAM_TOKEN")
 CHAT_ID = os.getenv("TELEGRAM_CHAT_ID")
 
 # Hora del resumen diario automático — 18:00 hora México = 00:00 UTC
-HORA_RESUMEN_UTC = 0
+HORA_RESUMEN_UTC     = 0
 _resumen_enviado_hoy = False
+
+# Umbral de alerta de uso Claude — avisa cuando queden pocas llamadas
+ALERTA_USO_UMBRAL    = 18  # avisa cuando llega a 18/20
+_alerta_uso_enviada  = False
 
 def enviar_mensaje_cmd(texto: str) -> bool:
     try:
@@ -153,14 +157,52 @@ async def procesar_comando(comando: str) -> str:
         except Exception as e:
             return f"Error obteniendo señales: {e}"
 
+    # ── /uso ─────────────────────────────────────────────────
+    elif cmd == "/uso":
+        try:
+            from nucleo.cliente_ia import obtener_stats_uso, MAX_LLAMADAS_HORA
+            stats      = obtener_stats_uso()
+            usadas     = stats["llamadas_ultima_hora"]
+            disponibles= stats["disponibles"]
+            limite     = stats["limite_hora"]
+            pct        = round(usadas / limite * 100) if limite > 0 else 0
+
+            # Barra visual de uso
+            bloques_llenos = round(pct / 10)
+            barra = "█" * bloques_llenos + "░" * (10 - bloques_llenos)
+
+            if pct >= 90:
+                emoji_uso = "🔴"
+                estado_uso = "CRÍTICO"
+            elif pct >= 70:
+                emoji_uso = "🟡"
+                estado_uso = "ALTO"
+            else:
+                emoji_uso = "🟢"
+                estado_uso = "NORMAL"
+
+            return (
+                f"🤖 <b>Uso Claude API</b>\n"
+                f"━━━━━━━━━━━━━━━━━━\n"
+                f"{emoji_uso} Estado: {estado_uso}\n"
+                f"Llamadas: {usadas}/{limite} por hora\n"
+                f"Disponibles: {disponibles}\n"
+                f"[{barra}] {pct}%\n"
+                f"━━━━━━━━━━━━━━━━━━\n"
+                f"Reset en: {stats.get('proximo_reset', 'N/A')}\n"
+                f"Agentes prioritarios: digestor_tecnico, digestor_maestro, digestor_riesgo\n"
+                f"━━━━━━━━━━━━━━━━━━\n"
+                f"⏰ {datetime.now().strftime('%H:%M:%S')}"
+            )
+        except Exception as e:
+            return f"Error obteniendo uso Claude: {e}"
+
     # ── /blacklist ───────────────────────────────────────────
     elif cmd == "/blacklist":
         try:
             import time
-            # Importa el estado global del loop
             try:
                 from loop_automatico import _estado, _lock_estado
-                from threading import Lock
                 with _lock_estado:
                     blacklist = dict(_estado.get("blacklist", {}))
             except:
@@ -179,7 +221,6 @@ async def procesar_comando(comando: str) -> str:
                     texto  += f"🔴 {simbolo} — desbloqueado en {horas}h {minutos}m\n"
                 else:
                     texto += f"🟡 {simbolo} — desbloqueando...\n"
-
             return texto
         except Exception as e:
             return f"Error obteniendo blacklist: {e}"
@@ -188,8 +229,7 @@ async def procesar_comando(comando: str) -> str:
     elif cmd == "/aprendizaje":
         try:
             from agente_financiero.logger_trading import obtener_reporte_aprendizaje
-            reporte = obtener_reporte_aprendizaje()
-            return reporte
+            return obtener_reporte_aprendizaje()
         except Exception as e:
             return f"Error obteniendo aprendizaje: {e}"
 
@@ -197,6 +237,7 @@ async def procesar_comando(comando: str) -> str:
     elif cmd == "/health":
         try:
             from agente_financiero.ejecutor_alpaca import obtener_portafolio
+            from nucleo.cliente_ia import obtener_stats_uso
             errores = []
             ok      = []
 
@@ -222,8 +263,12 @@ async def procesar_comando(comando: str) -> str:
                 errores.append("Supabase")
 
             try:
-                key = os.getenv("ANTHROPIC_API_KEY", "")
-                ok.append("Claude API key ✓") if key and len(key) > 20 else errores.append("Claude API — sin créditos")
+                key   = os.getenv("ANTHROPIC_API_KEY", "")
+                stats = obtener_stats_uso()
+                if key and len(key) > 20:
+                    ok.append(f"Claude API ✓ ({stats['llamadas_ultima_hora']}/{stats['limite_hora']}/h)")
+                else:
+                    errores.append("Claude API — sin créditos")
             except:
                 errores.append("Claude API")
 
@@ -274,6 +319,7 @@ async def procesar_comando(comando: str) -> str:
             "/rendimiento — P&L en tiempo real completo\n"
             "/posiciones — Posiciones abiertas con detalle\n"
             "/senales — Estadísticas de señales del día\n"
+            "/uso — Uso de Claude API en tiempo real\n"
             "/blacklist — Activos bloqueados y tiempo restante\n"
             "/aprendizaje — Reporte de rendimiento por activo\n"
             "/health — Estado de todos los componentes\n"
@@ -285,16 +331,14 @@ async def procesar_comando(comando: str) -> str:
         return f"❓ Comando no reconocido: {cmd}\nEscribe /help para ver los comandos"
 
 async def enviar_resumen_diario():
-    """
-    Envía resumen diario automático a las 18:00 hora México (00:00 UTC).
-    Incluye P&L del día, señales, win rate y reporte de aprendizaje.
-    """
     try:
-        from agente_financiero.ejecutor_alpaca import obtener_portafolio, obtener_posiciones
+        from agente_financiero.ejecutor_alpaca import obtener_portafolio
         from agente_financiero.logger_trading import obtener_estadisticas_dia, obtener_reporte_aprendizaje
+        from nucleo.cliente_ia import obtener_stats_uso
 
         portafolio = obtener_portafolio()
         stats      = obtener_estadisticas_dia()
+        uso_claude = obtener_stats_uso()
         pnl_dia    = portafolio.get("pnl_dia", 0)
         pnl_emoji  = "📈" if pnl_dia >= 0 else "📉"
         win_rate   = stats.get("win_rate", 0)
@@ -314,7 +358,9 @@ async def enviar_resumen_diario():
             f"✅ Ganancias: {stats.get('ganancias', 0)} | ❌ Pérdidas: {stats.get('perdidas', 0)}\n"
             f"{wr_emoji} Win rate: {win_rate:.1f}%\n"
             f"━━━━━━━━━━━━━━━━━━\n"
-            f"{reporte_aprendizaje[:500]}\n"
+            f"🤖 Claude usado hoy: {uso_claude['llamadas_ultima_hora']} llamadas\n"
+            f"━━━━━━━━━━━━━━━━━━\n"
+            f"{reporte_aprendizaje[:400]}\n"
             f"━━━━━━━━━━━━━━━━━━\n"
             f"⏰ Próximo ciclo: sesión Asia 08:00 UTC"
         )
@@ -322,6 +368,38 @@ async def enviar_resumen_diario():
         print(f"[telegram_cmd] Resumen diario enviado")
     except Exception as e:
         print(f"[telegram_cmd] Error resumen diario: {e}")
+
+async def verificar_alerta_uso_claude():
+    """
+    Verifica si Claude está cerca del límite y envía alerta por Telegram.
+    Se llama cada ciclo desde escuchar_comandos.
+    """
+    global _alerta_uso_enviada
+    try:
+        from nucleo.cliente_ia import obtener_stats_uso, MAX_LLAMADAS_HORA
+        stats  = obtener_stats_uso()
+        usadas = stats["llamadas_ultima_hora"]
+
+        if usadas >= ALERTA_USO_UMBRAL and not _alerta_uso_enviada:
+            enviar_mensaje_cmd(
+                f"⚠️ <b>Alerta uso Claude API</b>\n"
+                f"━━━━━━━━━━━━━━━━━━\n"
+                f"Llamadas usadas: {usadas}/{MAX_LLAMADAS_HORA}\n"
+                f"Solo quedan {MAX_LLAMADAS_HORA - usadas} llamadas disponibles\n"
+                f"El sistema seguirá operando con Ollama y fallback numérico\n"
+                f"Reset en: {stats.get('proximo_reset', 'N/A')}\n"
+                f"━━━━━━━━━━━━━━━━━━\n"
+                f"Usa /uso para monitorear en tiempo real"
+            )
+            _alerta_uso_enviada = True
+            print(f"[telegram_cmd] Alerta uso Claude enviada — {usadas}/{MAX_LLAMADAS_HORA}")
+
+        # Reset de la alerta cuando bajan las llamadas (nuevo ciclo de hora)
+        elif usadas < ALERTA_USO_UMBRAL and _alerta_uso_enviada:
+            _alerta_uso_enviada = False
+
+    except Exception as e:
+        print(f"[telegram_cmd] Error verificando uso Claude: {e}")
 
 async def escuchar_comandos():
     global _resumen_enviado_hoy
@@ -337,6 +415,9 @@ async def escuchar_comandos():
                 _resumen_enviado_hoy = True
             elif hora_utc != HORA_RESUMEN_UTC:
                 _resumen_enviado_hoy = False
+
+            # ── Alerta uso Claude ─────────────────────────────
+            await verificar_alerta_uso_claude()
 
             # ── Comandos ──────────────────────────────────────
             updates = obtener_updates(offset)
