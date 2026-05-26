@@ -11,13 +11,11 @@ from dotenv import load_dotenv
 load_dotenv(override=True)
 load_dotenv(override=False)
 
-# Activos relacionados con petróleo
-# PXD (Pioneer) fue adquirida por Exxon en 2024 — reemplazada por EOG Resources
 ACTIVOS_PETROLEO = {
     "futuros": {
-        "WTI":   "CL=F",   # West Texas Intermediate
-        "Brent": "BZ=F",   # Brent Crude
-        "Gas":   "NG=F",   # Natural Gas
+        "WTI":   "CL=F",
+        "Brent": "BZ=F",
+        "Gas":   "NG=F",
     },
     "empresas": {
         "Exxon":      "XOM",
@@ -26,7 +24,7 @@ ACTIVOS_PETROLEO = {
         "Schlumberger":"SLB",
         "ConocoPhil": "COP",
         "Halliburton":"HAL",
-        "EOG":        "EOG",   # reemplaza PXD delisted
+        "EOG":        "EOG",
     },
     "etfs": {
         "Oil_ETF":    "USO",
@@ -199,7 +197,8 @@ Analiza los datos y entrega:
 5. Prediccion de movimiento proximas 48 horas
 6. Nivel de riesgo energetico global: BAJO/MEDIO/ALTO
 Responde en espanol, conciso y accionable.""",
-        max_tokens=800
+        max_tokens=800,
+        agente="agente_petroleo"
     )
 
     return {

@@ -15,7 +15,7 @@ VIDEOS_SEGUIMIENTO = [
 
 def extraer_transcripcion(video_id: str) -> str:
     try:
-        ytt = YouTubeTranscriptApi()
+        ytt        = YouTubeTranscriptApi()
         transcript = ytt.fetch(video_id)
         return " ".join([t.text for t in transcript])
     except TranscriptsDisabled:
@@ -28,7 +28,6 @@ def extraer_transcripcion(video_id: str) -> str:
 async def analizar_video_financiero(video_id: str, titulo: str = "") -> dict:
     print(f"[agente_youtube] Extrayendo {video_id}...")
     transcripcion = extraer_transcripcion(video_id)
-
     if transcripcion.startswith("Error") or transcripcion.startswith("Video") or transcripcion.startswith("Sin"):
         return {"video_id": video_id, "error": transcripcion, "analisis": None}
 
@@ -43,15 +42,16 @@ Analiza transcripciones de videos financieros y extrae:
 4. Nivel de confianza (alto/medio/bajo)
 5. Horizonte temporal mencionado
 Responde siempre en español de forma concisa.""",
-        max_tokens=800
+        max_tokens=800,
+        agente="agente_youtube"
     )
 
     return {
-        "video_id": video_id,
-        "titulo": titulo,
-        "transcripcion_chars": len(transcripcion),
-        "analisis": respuesta["texto"],
-        "modelo": respuesta["modelo"]
+        "video_id":             video_id,
+        "titulo":               titulo,
+        "transcripcion_chars":  len(transcripcion),
+        "analisis":             respuesta["texto"],
+        "modelo":               respuesta["modelo"],
     }
 
 async def obtener_reporte_youtube(video_ids: list = None) -> str:
@@ -62,13 +62,13 @@ async def obtener_reporte_youtube(video_ids: list = None) -> str:
         resultado = await analizar_video_financiero(vid)
         if resultado.get("analisis"):
             reportes.append(f"VIDEO {vid}:\n{resultado['analisis']}")
-
     if not reportes:
         return "No se pudieron analizar videos"
 
     resumen = await chat(
         mensajes=[{"role": "user", "content": f"Consolida estos análisis de videos financieros en un reporte ejecutivo:\n\n{'---'.join(reportes)}"}],
         system="Eres un digestor de información financiera. Consolida múltiples análisis en un reporte ejecutivo conciso. Responde en español.",
-        max_tokens=600
+        max_tokens=600,
+        agente="agente_youtube"
     )
     return resumen["texto"]
