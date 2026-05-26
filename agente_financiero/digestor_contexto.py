@@ -46,7 +46,6 @@ async def ejecutar_ciclo_contexto() -> dict:
     print(f"\n[digestor_contexto] Ciclo contexto {timestamp}")
     print("[1/8] Ejecutando 7 agentes en paralelo + trends con timeout...")
 
-    # return_exceptions=True — nunca crashea
     resultados = await asyncio.gather(
         analizar_sentimiento_mercado(),
         analizar_contexto_macro(),
@@ -59,7 +58,6 @@ async def ejecutar_ciclo_contexto() -> dict:
         return_exceptions=True
     )
 
-    # Defaults si algún agente falla
     defaults = [
         {"fear_greed": {}, "analisis": "Sin datos"},
         {"analisis": "Sin datos"},
@@ -78,19 +76,16 @@ async def ejecutar_ciclo_contexto() -> dict:
 
     sent_res, macro_res, fund_res, hist_res, petro_res, estac_res, opciones_res, trends_res = resultados_seguros
 
-    # Reporta errores sin crashear
     nombres = ["sentimiento", "macro", "fundamental", "historico", "petroleo", "estacionalidad", "opciones", "trends"]
     for i, r in enumerate(resultados):
         if isinstance(r, Exception):
             print(f"[digestor_contexto] Error en {nombres[i]}: {r}")
 
-    # Fear & Greed
     fear_greed   = sent_res.get("fear_greed", {}) if isinstance(sent_res, dict) else {}
     fg_valor     = fear_greed.get("valor_hoy", 50)
     fg_clasif    = fear_greed.get("clasificacion", "Neutral")
     fg_tendencia = fear_greed.get("tendencia", "neutral")
 
-    # Analisis textuales
     sent_analisis  = sent_res.get("analisis", "Sin datos") if isinstance(sent_res, dict) else "Sin datos"
     macro_analisis = macro_res.get("analisis", "Sin datos") if isinstance(macro_res, dict) else "Sin datos"
     fund_analisis  = fund_res.get("analisis", "Sin datos")  if isinstance(fund_res, dict)  else "Sin datos"
@@ -99,7 +94,6 @@ async def ejecutar_ciclo_contexto() -> dict:
     wti_precio     = petro_res.get("precios", {}).get("WTI", {}).get("precio", "N/A") if isinstance(petro_res, dict) else "N/A"
     wti_cambio     = petro_res.get("precios", {}).get("WTI", {}).get("cambio_dia", 0) if isinstance(petro_res, dict) else 0
 
-    # Estacionalidad y opciones
     estac_señal    = estac_res.get("señal_estacional", "NEUTRAL") if isinstance(estac_res, dict) else "NEUTRAL"
     estac_conf     = estac_res.get("confianza", 50) if isinstance(estac_res, dict) else 50
     estac_fase     = estac_res.get("ciclo_halving", {}).get("fase", "N/A") if isinstance(estac_res, dict) else "N/A"
@@ -111,7 +105,6 @@ async def ejecutar_ciclo_contexto() -> dict:
 
     print(f"[digestor_contexto] F&G={fg_valor} | Estac={estac_señal} | PCR={pcr_btc} | WTI=${wti_precio}")
 
-    # Google Trends — usa 'promedio' con fallback a 'promedio_3m'
     trends_lista   = trends_res if isinstance(trends_res, list) else []
     trends_señales = [t for t in trends_lista if t.get("señal") not in ["ESPERAR", None] and not t.get("error")]
     trends_resumen = "\n".join([
@@ -120,7 +113,6 @@ async def ejecutar_ciclo_contexto() -> dict:
     ]) if trends_señales else "Sin señales de trends disponibles"
     print(f"[digestor_contexto] Trends: {len(trends_señales)} señales")
 
-    # Sesgo de contexto
     puntos_alcista = 0
     puntos_bajista = 0
 
@@ -144,7 +136,7 @@ async def ejecutar_ciclo_contexto() -> dict:
     if len(trends_señales) >= 2:
         compra_trends = sum(1 for t in trends_señales if t.get("señal") == "COMPRAR")
         venta_trends  = sum(1 for t in trends_señales if t.get("señal") == "VENDER")
-        if compra_trends > venta_trends:  puntos_alcista += 1
+        if compra_trends > venta_trends:   puntos_alcista += 1
         elif venta_trends > compra_trends: puntos_bajista += 1
 
     if puntos_alcista > puntos_bajista:
@@ -199,7 +191,8 @@ Entrega reporte ejecutivo con:
 3. Nivel de riesgo: BAJO/MEDIO/ALTO
 4. Recomendacion estrategica para proximas 24 horas
 Responde en español, maximo 200 palabras.""",
-        max_tokens=400
+        max_tokens=400,
+        agente="digestor_contexto"
     )
 
     return {
