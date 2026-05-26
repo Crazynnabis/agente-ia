@@ -30,11 +30,13 @@ from agente_financiero.telegram_comandos import escuchar_comandos
 
 ACTIVOS_CRYPTO = ["BTCUSDT", "ETHUSDT", "SOLUSDT", "BNBUSDT"]
 
-# Umbral de volatilidad extrema — alerta si mueve más de X% en 15 minutos
-UMBRAL_VOLATILIDAD = 3.0
+# Umbral de volatilidad extrema
+UMBRAL_VOLATILIDAD      = 3.0
+# Tiempo de reset de volatilidad_alta — 30 minutos
+TTL_VOLATILIDAD_ALTA    = 1800
 
 # ============================================================
-# ESTADO GLOBAL COMPARTIDO ENTRE LOOPS — thread-safe
+# ESTADO GLOBAL
 # ============================================================
 _lock_estado = Lock()
 _estado = {
@@ -52,6 +54,7 @@ _estado = {
     "blacklist":             {},
     "perdidas_consecutivas": {},
     "volatilidad_alta":      False,
+    "volatilidad_alta_ts":   0,       # timestamp cuando se activó
     "ciclo_4h":              0,
     "ciclo_1h":              0,
     "ciclo_15m":             0,
@@ -60,8 +63,8 @@ _estado = {
     "dxy_señal":             "ESPERAR",
     "dxy_datos":             {},
     "modo_conservador":      False,
-    "precios_anteriores":    {},  # para calcular volatilidad
-    "ballenas_señal":        "ESPERAR",  # señal del agente ballenas
+    "precios_anteriores":    {},
+    "ballenas_señal":        "ESPERAR",
     "ballenas_ts":           0,
 }
 
@@ -129,6 +132,25 @@ def evaluar_modo_conservador():
             )
     return conservador
 
+def evaluar_reset_volatilidad():
+    """
+    Reset automático de volatilidad_alta después de 30 minutos.
+    Evita que el sistema quede bloqueado indefinidamente.
+    """
+    with _lock_estado:
+        if not _estado["volatilidad_alta"]:
+            return
+        ts_activacion = _estado.get("volatilidad_alta_ts", 0)
+        if ts_activacion > 0 and (time.time() - ts_activacion) > TTL_VOLATILIDAD_ALTA:
+            _estado["volatilidad_alta"]    = False
+            _estado["volatilidad_alta_ts"] = 0
+            print(f"[volatilidad] Reset automático — modo normal restaurado")
+            enviar_mensaje(
+                f"✅ <b>Volatilidad normalizada</b>\n"
+                f"Sistema restaurado a modo normal\n"
+                f"⏰ {datetime.now().strftime('%H:%M:%S')}"
+            )
+
 def calcular_cantidad_por_confianza(confianza: float, precio: float, stop_loss: float) -> float:
     portafolio  = obtener_portafolio()
     capital     = portafolio.get("capital_total", 100000)
@@ -172,19 +194,39 @@ def obtener_parametros_ejecucion() -> dict:
         "conservador":      conservador,
     }
 
+def obtener_info_modo() -> dict:
+    """Retorna información del modo actual para el comando /modo."""
+    hora_utc    = datetime.now(timezone.utc).hour
+    conservador = get_estado("modo_conservador")
+    vol_alta    = get_estado("volatilidad_alta")
+
+    if conservador:
+        horas_restantes = 8 - hora_utc if hora_utc < 8 else 0
+        siguiente_cambio = f"Modo normal en {horas_restantes}h (08:00 UTC)"
+    else:
+        horas_hasta_noche = 24 - hora_utc if hora_utc >= 8 else 0
+        siguiente_cambio  = f"Modo conservador en {horas_hasta_noche}h (00:00 UTC)"
+
+    return {
+        "conservador":      conservador,
+        "volatilidad_alta": vol_alta,
+        "hora_utc":         hora_utc,
+        "siguiente_cambio": siguiente_cambio,
+        "confianza_minima": 88 if conservador else 80,
+        "votos_minimos":    3  if conservador else 2,
+        "tamaño_posicion":  "50%" if conservador else "100%",
+        "atr_multiplier":   calcular_atr_multiplier(),
+    }
+
 # ============================================================
 # MONITOR DE VOLATILIDAD EXTREMA
 # ============================================================
 async def monitorear_volatilidad(ind_res: list):
-    """
-    Detecta movimientos >3% en 15 minutos y alerta por Telegram.
-    Compara precio actual con el precio del ciclo anterior.
-    """
     try:
         with _lock_estado:
             precios_ant = dict(_estado["precios_anteriores"])
 
-        alertas_vol = []
+        alertas_vol    = []
         nuevos_precios = {}
 
         for ind in ind_res:
@@ -206,11 +248,9 @@ async def monitorear_volatilidad(ind_res: list):
                         "direccion":  direccion,
                     })
 
-        # Actualiza precios anteriores
         with _lock_estado:
             _estado["precios_anteriores"].update(nuevos_precios)
 
-        # Envía alertas
         for alerta in alertas_vol:
             print(f"[volatilidad] ⚡ {alerta['simbolo']} movió {alerta['cambio_pct']:+.2f}% en 15min")
             enviar_mensaje(
@@ -224,47 +264,40 @@ async def monitorear_volatilidad(ind_res: list):
                 f"Usa /posiciones para ver tu exposición"
             )
 
-            # Si volatilidad extrema — activa modo conservador temporal
             if abs(alerta["cambio_pct"]) >= 5.0:
-                set_estado("volatilidad_alta", True)
+                with _lock_estado:
+                    _estado["volatilidad_alta"]    = True
+                    _estado["volatilidad_alta_ts"] = time.time()  # guarda timestamp
                 enviar_mensaje(
                     f"🚨 <b>ALERTA CRÍTICA</b> — {alerta['simbolo']} movió {alerta['cambio_pct']:+.2f}%\n"
-                    f"Sistema en modo ultra-conservador temporalmente"
+                    f"Sistema en modo ultra-conservador por 30 minutos\n"
+                    f"Reset automático a las {datetime.now().strftime('%H:%M')} + 30min"
                 )
 
     except Exception as e:
         print(f"[volatilidad] Error: {e}")
 
 # ============================================================
-# AGENTE BALLENAS — detecta movimientos grandes on-chain
+# AGENTE BALLENAS
 # ============================================================
 async def monitorear_ballenas():
-    """
-    Detecta transacciones grandes de ballenas usando Etherscan y Binance.
-    Corre cada hora — API gratuita con límites.
-    """
     try:
         import requests
-
         señales_ballenas = []
 
-        # Binance large trades — detección via order book imbalance
         for simbolo in ["BTCUSDT", "ETHUSDT"]:
             try:
                 r = requests.get(
-                    f"https://api.binance.com/api/v3/depth",
+                    "https://api.binance.com/api/v3/depth",
                     params={"symbol": simbolo, "limit": 20},
                     timeout=10
                 )
                 if r.status_code != 200:
                     continue
 
-                data   = r.json()
-                bids   = data.get("bids", [])
-                asks   = data.get("asks", [])
-
-                vol_bids = sum(float(b[1]) for b in bids)
-                vol_asks = sum(float(a[1]) for a in asks)
+                data     = r.json()
+                vol_bids = sum(float(b[1]) for b in data.get("bids", []))
+                vol_asks = sum(float(a[1]) for a in data.get("asks", []))
                 total    = vol_bids + vol_asks
 
                 if total == 0:
@@ -272,39 +305,34 @@ async def monitorear_ballenas():
 
                 ratio_compra = vol_bids / total * 100
 
-                # Imbalance fuerte — posible movimiento de ballena
                 if ratio_compra > 70:
                     señales_ballenas.append({
                         "simbolo": simbolo,
                         "señal":   "COMPRAR",
-                        "razon":   f"Order book {ratio_compra:.1f}% compras — posible acumulación ballena",
+                        "razon":   f"Order book {ratio_compra:.1f}% compras — acumulación ballena",
                         "fuerza":  "alta" if ratio_compra > 80 else "media",
                     })
-                    print(f"[ballenas] {simbolo}: acumulación detectada {ratio_compra:.1f}%")
+                    print(f"[ballenas] {simbolo}: acumulación {ratio_compra:.1f}%")
                 elif ratio_compra < 30:
                     señales_ballenas.append({
                         "simbolo": simbolo,
                         "señal":   "VENDER",
-                        "razon":   f"Order book {100-ratio_compra:.1f}% ventas — posible distribución ballena",
+                        "razon":   f"Order book {100-ratio_compra:.1f}% ventas — distribución ballena",
                         "fuerza":  "alta" if ratio_compra < 20 else "media",
                     })
-                    print(f"[ballenas] {simbolo}: distribución detectada {100-ratio_compra:.1f}%")
+                    print(f"[ballenas] {simbolo}: distribución {100-ratio_compra:.1f}%")
 
             except Exception as e:
                 print(f"[ballenas] Error {simbolo}: {e}")
 
-        # Guarda señal dominante
         if señales_ballenas:
             compras = sum(1 for s in señales_ballenas if s["señal"] == "COMPRAR")
             ventas  = sum(1 for s in señales_ballenas if s["señal"] == "VENDER")
             señal   = "COMPRAR" if compras > ventas else ("VENDER" if ventas > compras else "ESPERAR")
-
             set_estado("ballenas_señal", señal)
             set_estado("ballenas_ts", time.time())
 
-            # Alerta si hay señal fuerte
-            fuertes = [s for s in señales_ballenas if s["fuerza"] == "alta"]
-            for s in fuertes:
+            for s in [x for x in señales_ballenas if x["fuerza"] == "alta"]:
                 enviar_mensaje(
                     f"🐋 <b>Movimiento de ballena detectado</b>\n"
                     f"━━━━━━━━━━━━━━━━━━\n"
@@ -455,7 +483,6 @@ async def loop_1h():
 
             print(f"[1H] DXY={dxy_actual:.2f} ({dxy_cambio_1h:+.2f}% 1h) | Corr={correlacion:.2f} | Señal={dxy_señal}")
 
-            # Monitorea ballenas cada hora
             print(f"[1H] Monitoreando ballenas...")
             await monitorear_ballenas()
             ballenas_señal = get_estado("ballenas_señal") or "ESPERAR"
@@ -473,7 +500,7 @@ async def loop_1h():
                 opciones_señal == "COMPRAR",
                 noticias_compra > noticias_venta,
                 dxy_señal == "COMPRAR",
-                ballenas_señal == "COMPRAR",  # señal ballenas
+                ballenas_señal == "COMPRAR",
             ])
             puntos_bajista = sum([
                 fg_valor < 40,
@@ -483,7 +510,7 @@ async def loop_1h():
                 opciones_señal == "VENDER",
                 noticias_venta > noticias_compra,
                 dxy_señal == "VENDER",
-                ballenas_señal == "VENDER",  # señal ballenas
+                ballenas_señal == "VENDER",
             ])
 
             sesgo         = "ALCISTA" if puntos_alcista > puntos_bajista else (
@@ -608,15 +635,20 @@ async def loop_2m():
                 await asyncio.sleep(2 * 60)
                 continue
 
-            conservador = evaluar_modo_conservador()
-            params      = obtener_parametros_ejecucion()
-            sesgo_ctx   = get_estado("sesgo_contexto") or "NEUTRAL"
-            atr_mult    = calcular_atr_multiplier()
-            dxy_señal   = get_estado("dxy_señal") or "ESPERAR"
+            # Reset automático de volatilidad_alta
+            evaluar_reset_volatilidad()
+
+            conservador    = evaluar_modo_conservador()
+            params         = obtener_parametros_ejecucion()
+            sesgo_ctx      = get_estado("sesgo_contexto") or "NEUTRAL"
+            atr_mult       = calcular_atr_multiplier()
+            dxy_señal      = get_estado("dxy_señal") or "ESPERAR"
             ballenas_señal = get_estado("ballenas_señal") or "ESPERAR"
+            vol_alta       = get_estado("volatilidad_alta")
 
             modo_txt = "🌙 CONSERVADOR" if conservador else "☀️ NORMAL"
-            print(f"[2M] Ciclo #{ciclo} — {datetime.now().strftime('%H:%M:%S')} | {modo_txt} | Sesgo={sesgo_ctx} | DXY={dxy_señal} | 🐋={ballenas_señal}")
+            vol_txt  = " | 🚨 VOL_ALTA" if vol_alta else ""
+            print(f"[2M] Ciclo #{ciclo} — {datetime.now().strftime('%H:%M:%S')} | {modo_txt}{vol_txt} | Sesgo={sesgo_ctx} | DXY={dxy_señal} | 🐋={ballenas_señal}")
 
             # ── Protección de capital ─────────────────────────────
             try:
@@ -653,7 +685,6 @@ async def loop_2m():
             if isinstance(of_res,    Exception): of_res    = []
             if isinstance(fund_res,  Exception): fund_res  = []
 
-            # ── Monitor de volatilidad extrema ────────────────────
             if ind_res:
                 await monitorear_volatilidad(ind_res)
 
@@ -674,7 +705,7 @@ async def loop_2m():
                     continue
 
                 # Pausa si volatilidad extrema activa
-                if get_estado("volatilidad_alta") and abs(confianza) < 95:
+                if get_estado("volatilidad_alta") and confianza < 95:
                     print(f"[2M] {simbolo} pausado — volatilidad extrema activa")
                     continue
 
@@ -689,7 +720,6 @@ async def loop_2m():
                 fund       = next((f for f in fund_res if f.get("simbolo") == simbolo), {})
                 señal_fund = fund.get("accion", "ESPERAR")
 
-                # Boost por noticia alineada
                 noticias_alertas = get_estado("noticias_alertas") or []
                 noticia_alineada = next(
                     (n for n in noticias_alertas
@@ -698,13 +728,11 @@ async def loop_2m():
                 )
                 boost_noticia = 5 if noticia_alineada else 0
 
-                # Boost por DXY alineado (solo BTCUSDT)
                 boost_dxy = 0
                 if simbolo == "BTCUSDT" and dxy_señal == señal_ind and dxy_señal != "ESPERAR":
                     boost_dxy = 5
                     print(f"[2M] DXY confirma señal {señal_ind} para BTCUSDT")
 
-                # Boost por ballenas alineadas (BTC y ETH)
                 boost_ballenas = 0
                 if simbolo in ["BTCUSDT", "ETHUSDT"] and ballenas_señal == señal_ind and ballenas_señal != "ESPERAR":
                     boost_ballenas = 5
@@ -736,10 +764,10 @@ async def loop_2m():
 
                 confianza_final = min(confianza + (votos * 5) + boost_noticia + boost_dxy + boost_ballenas, 99)
                 extras = []
-                if noticia_alineada:    extras.append(f"📰 {noticia_alineada['titulo_top'][:40]}")
-                if boost_dxy > 0:       extras.append("💵 DXY confirma")
-                if boost_ballenas > 0:  extras.append("🐋 Ballenas confirman")
-                if conservador:         extras.append("🌙 modo conservador")
+                if noticia_alineada:   extras.append(f"📰 {noticia_alineada['titulo_top'][:40]}")
+                if boost_dxy > 0:      extras.append("💵 DXY confirma")
+                if boost_ballenas > 0: extras.append("🐋 Ballenas confirman")
+                if conservador:        extras.append("🌙 modo conservador")
                 razon_extra = " | " + " | ".join(extras) if extras else ""
 
                 print(f"[2M] SEÑAL: {simbolo} {señal_ind} conf={confianza_final}% votos={votos}{' +DXY' if boost_dxy else ''}{' +ballenas' if boost_ballenas else ''}{' +noticia' if boost_noticia else ''}{' 🌙' if conservador else ''}")
@@ -783,7 +811,7 @@ async def main():
         f"🤖 <b>Sistema Trading IA iniciado</b>\n"
         f"Arquitectura: 4h | 1h | 15m | 2m\n"
         f"Noticias RSS + DXY + Ballenas activos\n"
-        f"Alertas volatilidad extrema >3% activas\n"
+        f"Alertas volatilidad >3% + Reset automático 30min\n"
         f"Rate limiter Claude 20/hora activo\n"
         f"Hora: {datetime.now().strftime('%H:%M:%S')}"
     )

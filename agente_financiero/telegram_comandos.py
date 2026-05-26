@@ -12,12 +12,9 @@ load_dotenv(r'C:\Users\Oscar Hernandez\.env', override=True)
 TOKEN   = os.getenv("TELEGRAM_TOKEN")
 CHAT_ID = os.getenv("TELEGRAM_CHAT_ID")
 
-# Hora del resumen diario automático — 18:00 hora México = 00:00 UTC
 HORA_RESUMEN_UTC     = 0
 _resumen_enviado_hoy = False
-
-# Umbral de alerta de uso Claude — avisa cuando queden pocas llamadas
-ALERTA_USO_UMBRAL    = 18  # avisa cuando llega a 18/20
+ALERTA_USO_UMBRAL    = 18
 _alerta_uso_enviada  = False
 
 def enviar_mensaje_cmd(texto: str) -> bool:
@@ -157,29 +154,53 @@ async def procesar_comando(comando: str) -> str:
         except Exception as e:
             return f"Error obteniendo señales: {e}"
 
+    # ── /modo ─────────────────────────────────────────────────
+    elif cmd == "/modo":
+        try:
+            from loop_automatico import obtener_info_modo
+            info = obtener_info_modo()
+
+            conservador = info["conservador"]
+            vol_alta    = info["volatilidad_alta"]
+            emoji_modo  = "🌙" if conservador else "☀️"
+            modo_txt    = "CONSERVADOR" if conservador else "NORMAL"
+            emoji_vol   = "🚨" if vol_alta else "✅"
+
+            return (
+                f"{emoji_modo} <b>Modo de operación actual</b>\n"
+                f"━━━━━━━━━━━━━━━━━━\n"
+                f"Modo: <b>{modo_txt}</b>\n"
+                f"Hora UTC: {info['hora_utc']:02d}:00\n"
+                f"Próximo cambio: {info['siguiente_cambio']}\n"
+                f"━━━━━━━━━━━━━━━━━━\n"
+                f"Confianza mínima: {info['confianza_minima']}%\n"
+                f"Votos requeridos: {info['votos_minimos']}\n"
+                f"Tamaño posición: {info['tamaño_posicion']}\n"
+                f"ATR multiplier: {info['atr_multiplier']}x\n"
+                f"━━━━━━━━━━━━━━━━━━\n"
+                f"{emoji_vol} Volatilidad alta: {'SÍ — pausando señales <95%' if vol_alta else 'No'}\n"
+                f"━━━━━━━━━━━━━━━━━━\n"
+                f"⏰ {datetime.now().strftime('%H:%M:%S')}"
+            )
+        except Exception as e:
+            return f"Error obteniendo modo: {e}"
+
     # ── /uso ─────────────────────────────────────────────────
     elif cmd == "/uso":
         try:
             from nucleo.cliente_ia import obtener_stats_uso, MAX_LLAMADAS_HORA
-            stats      = obtener_stats_uso()
-            usadas     = stats["llamadas_ultima_hora"]
-            disponibles= stats["disponibles"]
-            limite     = stats["limite_hora"]
-            pct        = round(usadas / limite * 100) if limite > 0 else 0
+            stats       = obtener_stats_uso()
+            usadas      = stats["llamadas_ultima_hora"]
+            disponibles = stats["disponibles"]
+            limite      = stats["limite_hora"]
+            pct         = round(usadas / limite * 100) if limite > 0 else 0
 
-            # Barra visual de uso
             bloques_llenos = round(pct / 10)
             barra = "█" * bloques_llenos + "░" * (10 - bloques_llenos)
 
-            if pct >= 90:
-                emoji_uso = "🔴"
-                estado_uso = "CRÍTICO"
-            elif pct >= 70:
-                emoji_uso = "🟡"
-                estado_uso = "ALTO"
-            else:
-                emoji_uso = "🟢"
-                estado_uso = "NORMAL"
+            if pct >= 90:   emoji_uso = "🔴"; estado_uso = "CRÍTICO"
+            elif pct >= 70: emoji_uso = "🟡"; estado_uso = "ALTO"
+            else:           emoji_uso = "🟢"; estado_uso = "NORMAL"
 
             return (
                 f"🤖 <b>Uso Claude API</b>\n"
@@ -319,6 +340,7 @@ async def procesar_comando(comando: str) -> str:
             "/rendimiento — P&L en tiempo real completo\n"
             "/posiciones — Posiciones abiertas con detalle\n"
             "/senales — Estadísticas de señales del día\n"
+            "/modo — Modo actual y parámetros de operación\n"
             "/uso — Uso de Claude API en tiempo real\n"
             "/blacklist — Activos bloqueados y tiempo restante\n"
             "/aprendizaje — Reporte de rendimiento por activo\n"
@@ -343,8 +365,7 @@ async def enviar_resumen_diario():
         pnl_emoji  = "📈" if pnl_dia >= 0 else "📉"
         win_rate   = stats.get("win_rate", 0)
         wr_emoji   = "🟢" if win_rate >= 50 else ("🟡" if win_rate >= 35 else "🔴")
-
-        reporte_aprendizaje = obtener_reporte_aprendizaje()
+        reporte    = obtener_reporte_aprendizaje()
 
         mensaje = (
             f"🌙 <b>Resumen diario — {datetime.now().strftime('%d/%m/%Y')}</b>\n"
@@ -360,7 +381,7 @@ async def enviar_resumen_diario():
             f"━━━━━━━━━━━━━━━━━━\n"
             f"🤖 Claude usado hoy: {uso_claude['llamadas_ultima_hora']} llamadas\n"
             f"━━━━━━━━━━━━━━━━━━\n"
-            f"{reporte_aprendizaje[:400]}\n"
+            f"{reporte[:400]}\n"
             f"━━━━━━━━━━━━━━━━━━\n"
             f"⏰ Próximo ciclo: sesión Asia 08:00 UTC"
         )
@@ -370,10 +391,6 @@ async def enviar_resumen_diario():
         print(f"[telegram_cmd] Error resumen diario: {e}")
 
 async def verificar_alerta_uso_claude():
-    """
-    Verifica si Claude está cerca del límite y envía alerta por Telegram.
-    Se llama cada ciclo desde escuchar_comandos.
-    """
     global _alerta_uso_enviada
     try:
         from nucleo.cliente_ia import obtener_stats_uso, MAX_LLAMADAS_HORA
@@ -393,8 +410,6 @@ async def verificar_alerta_uso_claude():
             )
             _alerta_uso_enviada = True
             print(f"[telegram_cmd] Alerta uso Claude enviada — {usadas}/{MAX_LLAMADAS_HORA}")
-
-        # Reset de la alerta cuando bajan las llamadas (nuevo ciclo de hora)
         elif usadas < ALERTA_USO_UMBRAL and _alerta_uso_enviada:
             _alerta_uso_enviada = False
 
@@ -408,7 +423,6 @@ async def escuchar_comandos():
 
     while True:
         try:
-            # ── Resumen diario automático ─────────────────────
             hora_utc = datetime.now(timezone.utc).hour
             if hora_utc == HORA_RESUMEN_UTC and not _resumen_enviado_hoy:
                 await enviar_resumen_diario()
@@ -416,10 +430,8 @@ async def escuchar_comandos():
             elif hora_utc != HORA_RESUMEN_UTC:
                 _resumen_enviado_hoy = False
 
-            # ── Alerta uso Claude ─────────────────────────────
             await verificar_alerta_uso_claude()
 
-            # ── Comandos ──────────────────────────────────────
             updates = obtener_updates(offset)
             for update in updates:
                 offset = update["update_id"] + 1
