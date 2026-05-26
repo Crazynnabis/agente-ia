@@ -28,47 +28,65 @@ from agente_financiero.ejecutor_alpaca import (
 )
 from agente_financiero.telegram_comandos import escuchar_comandos
 
-ACTIVOS_CRYPTO = ["BTCUSDT", "ETHUSDT", "SOLUSDT", "BNBUSDT"]
+ACTIVOS_CRYPTO       = ["BTCUSDT", "ETHUSDT", "SOLUSDT", "BNBUSDT"]
+UMBRAL_VOLATILIDAD   = 3.0
+TTL_VOLATILIDAD_ALTA = 1800  # 30 minutos
 
-# Umbral de volatilidad extrema
-UMBRAL_VOLATILIDAD      = 3.0
-# Tiempo de reset de volatilidad_alta — 30 minutos
-TTL_VOLATILIDAD_ALTA    = 1800
+# Archivo de log de errores
+LOG_ERRORES = os.path.join(
+    r'C:\Users\Oscar Hernandez\agente-ia\logs',
+    f"errores_{datetime.now().strftime('%Y%m%d')}.log"
+)
 
 # ============================================================
 # ESTADO GLOBAL
 # ============================================================
 _lock_estado = Lock()
 _estado = {
-    "contexto_macro":        {},
-    "contexto_ts":           0,
-    "sesgo_contexto":        "NEUTRAL",
-    "confianza_contexto":    50,
-    "fear_greed":            50,
-    "wti_precio":            0,
-    "estac_señal":           "NEUTRAL",
-    "pcr_btc":               1.0,
-    "tabla_maestra":         [],
-    "señales_fuertes":       [],
-    "tabla_ts":              0,
-    "blacklist":             {},
-    "perdidas_consecutivas": {},
-    "volatilidad_alta":      False,
-    "volatilidad_alta_ts":   0,       # timestamp cuando se activó
-    "ciclo_4h":              0,
-    "ciclo_1h":              0,
-    "ciclo_15m":             0,
-    "ciclo_2m":              0,
-    "noticias_alertas":      [],
-    "dxy_señal":             "ESPERAR",
-    "dxy_datos":             {},
-    "modo_conservador":      False,
-    "precios_anteriores":    {},
-    "ballenas_señal":        "ESPERAR",
-    "ballenas_ts":           0,
+    "contexto_macro":          {},
+    "contexto_ts":             0,
+    "sesgo_contexto":          "NEUTRAL",
+    "confianza_contexto":      50,
+    "fear_greed":              50,
+    "wti_precio":              0,
+    "estac_señal":             "NEUTRAL",
+    "pcr_btc":                 1.0,
+    "tabla_maestra":           [],
+    "señales_fuertes":         [],
+    "tabla_ts":                0,
+    "blacklist":               {},
+    "perdidas_consecutivas":   {},
+    "volatilidad_alta":        False,
+    "volatilidad_alta_ts":     0,
+    "volatilidad_alta_origen": "",  # "spike" o "fear_greed"
+    "ciclo_4h":                0,
+    "ciclo_1h":                0,
+    "ciclo_15m":               0,
+    "ciclo_2m":                0,
+    "noticias_alertas":        [],
+    "dxy_señal":               "ESPERAR",
+    "dxy_datos":               {},
+    "modo_conservador":        False,
+    "precios_anteriores":      {},
+    "ballenas_señal":          "ESPERAR",
+    "ballenas_ts":             0,
+    "sistema_pausado":         False,  # pausa manual via Telegram
+    "sistema_pausado_ts":      0,
 }
 
 gestor = GestorRiesgo()
+
+# ============================================================
+# LOG DE ERRORES
+# ============================================================
+def log_error(agente: str, error: str):
+    """Guarda errores en archivo para análisis posterior."""
+    try:
+        os.makedirs(os.path.dirname(LOG_ERRORES), exist_ok=True)
+        with open(LOG_ERRORES, "a", encoding="utf-8") as f:
+            f.write(f"{datetime.now().isoformat()} | {agente} | {error}\n")
+    except:
+        pass
 
 # ============================================================
 # UTILIDADES
@@ -133,17 +151,19 @@ def evaluar_modo_conservador():
     return conservador
 
 def evaluar_reset_volatilidad():
-    """
-    Reset automático de volatilidad_alta después de 30 minutos.
-    Evita que el sistema quede bloqueado indefinidamente.
-    """
+    """Reset automático de volatilidad_alta después de 30 minutos."""
     with _lock_estado:
         if not _estado["volatilidad_alta"]:
             return
+        # Solo resetea si fue activado por spike de precio
+        # Si fue activado por Fear&Greed extremo, el loop_1h lo maneja
+        if _estado.get("volatilidad_alta_origen") != "spike":
+            return
         ts_activacion = _estado.get("volatilidad_alta_ts", 0)
         if ts_activacion > 0 and (time.time() - ts_activacion) > TTL_VOLATILIDAD_ALTA:
-            _estado["volatilidad_alta"]    = False
-            _estado["volatilidad_alta_ts"] = 0
+            _estado["volatilidad_alta"]        = False
+            _estado["volatilidad_alta_ts"]     = 0
+            _estado["volatilidad_alta_origen"] = ""
             print(f"[volatilidad] Reset automático — modo normal restaurado")
             enviar_mensaje(
                 f"✅ <b>Volatilidad normalizada</b>\n"
@@ -195,13 +215,13 @@ def obtener_parametros_ejecucion() -> dict:
     }
 
 def obtener_info_modo() -> dict:
-    """Retorna información del modo actual para el comando /modo."""
     hora_utc    = datetime.now(timezone.utc).hour
     conservador = get_estado("modo_conservador")
     vol_alta    = get_estado("volatilidad_alta")
+    pausado     = get_estado("sistema_pausado")
 
     if conservador:
-        horas_restantes = 8 - hora_utc if hora_utc < 8 else 0
+        horas_restantes  = 8 - hora_utc if hora_utc < 8 else 0
         siguiente_cambio = f"Modo normal en {horas_restantes}h (08:00 UTC)"
     else:
         horas_hasta_noche = 24 - hora_utc if hora_utc >= 8 else 0
@@ -210,6 +230,7 @@ def obtener_info_modo() -> dict:
     return {
         "conservador":      conservador,
         "volatilidad_alta": vol_alta,
+        "pausado":          pausado,
         "hora_utc":         hora_utc,
         "siguiente_cambio": siguiente_cambio,
         "confianza_minima": 88 if conservador else 80,
@@ -234,18 +255,16 @@ async def monitorear_volatilidad(ind_res: list):
             precio  = ind.get("precio", 0)
             if not precio or not simbolo:
                 continue
-
             nuevos_precios[simbolo] = precio
 
             if simbolo in precios_ant and precios_ant[simbolo] > 0:
                 cambio_pct = ((precio - precios_ant[simbolo]) / precios_ant[simbolo]) * 100
                 if abs(cambio_pct) >= UMBRAL_VOLATILIDAD:
-                    direccion = "📈 SUBIDA" if cambio_pct > 0 else "📉 BAJADA"
                     alertas_vol.append({
                         "simbolo":    simbolo,
                         "cambio_pct": round(cambio_pct, 2),
                         "precio":     precio,
-                        "direccion":  direccion,
+                        "direccion":  "📈 SUBIDA" if cambio_pct > 0 else "📉 BAJADA",
                     })
 
         with _lock_estado:
@@ -264,17 +283,21 @@ async def monitorear_volatilidad(ind_res: list):
                 f"Usa /posiciones para ver tu exposición"
             )
 
+            # Solo activa volatilidad_alta por spikes >= 5%
+            # NO interfiere con el flag de Fear&Greed del loop_1h
             if abs(alerta["cambio_pct"]) >= 5.0:
                 with _lock_estado:
-                    _estado["volatilidad_alta"]    = True
-                    _estado["volatilidad_alta_ts"] = time.time()  # guarda timestamp
+                    _estado["volatilidad_alta"]        = True
+                    _estado["volatilidad_alta_ts"]     = time.time()
+                    _estado["volatilidad_alta_origen"] = "spike"
                 enviar_mensaje(
                     f"🚨 <b>ALERTA CRÍTICA</b> — {alerta['simbolo']} movió {alerta['cambio_pct']:+.2f}%\n"
                     f"Sistema en modo ultra-conservador por 30 minutos\n"
-                    f"Reset automático a las {datetime.now().strftime('%H:%M')} + 30min"
+                    f"Reset automático en 30min"
                 )
 
     except Exception as e:
+        log_error("monitorear_volatilidad", str(e))
         print(f"[volatilidad] Error: {e}")
 
 # ============================================================
@@ -299,7 +322,6 @@ async def monitorear_ballenas():
                 vol_bids = sum(float(b[1]) for b in data.get("bids", []))
                 vol_asks = sum(float(a[1]) for a in data.get("asks", []))
                 total    = vol_bids + vol_asks
-
                 if total == 0:
                     continue
 
@@ -323,7 +345,7 @@ async def monitorear_ballenas():
                     print(f"[ballenas] {simbolo}: distribución {100-ratio_compra:.1f}%")
 
             except Exception as e:
-                print(f"[ballenas] Error {simbolo}: {e}")
+                log_error("ballenas", f"{simbolo}: {e}")
 
         if señales_ballenas:
             compras = sum(1 for s in señales_ballenas if s["señal"] == "COMPRAR")
@@ -344,6 +366,7 @@ async def monitorear_ballenas():
             set_estado("ballenas_señal", "ESPERAR")
 
     except Exception as e:
+        log_error("ballenas_general", str(e))
         print(f"[ballenas] Error general: {e}")
 
 # ============================================================
@@ -385,6 +408,7 @@ async def loop_4h():
                                  ("hist", resultados[2]), ("fund", resultados[3]),
                                  ("noticias", resultados[4])]:
                 if isinstance(res, Exception):
+                    log_error(f"loop_4h_{nombre}", str(res))
                     print(f"[4H] Error en {nombre}: {res}")
 
             estac_señal = estac.get("señal_estacional", "NEUTRAL") if isinstance(estac, dict) else "NEUTRAL"
@@ -426,8 +450,10 @@ async def loop_4h():
             )
 
         except asyncio.TimeoutError:
+            log_error("loop_4h", "Timeout")
             print(f"[4H] Timeout — continuando con datos parciales")
         except Exception as e:
+            log_error("loop_4h", str(e))
             print(f"[4H] Error: {e}")
             enviar_mensaje(f"⚠️ Error loop 4h: {str(e)[:100]}")
 
@@ -461,10 +487,10 @@ async def loop_1h():
                 return_exceptions=True
             )
 
-            if isinstance(sent,     Exception): sent    = {}
-            if isinstance(macro,    Exception): macro   = {}
-            if isinstance(petro,    Exception): petro   = {}
-            if isinstance(opciones, Exception): opciones= []
+            if isinstance(sent,     Exception): sent    = {}; log_error("loop_1h_sent", str(sent))
+            if isinstance(macro,    Exception): macro   = {}; log_error("loop_1h_macro", str(macro))
+            if isinstance(petro,    Exception): petro   = {}; log_error("loop_1h_petro", str(petro))
+            if isinstance(opciones, Exception): opciones= []; log_error("loop_1h_opciones", str(opciones))
             if isinstance(dxy,      Exception): dxy     = {"señal": "ESPERAR", "error": True}
 
             fg_valor       = sent.get("fear_greed", {}).get("valor_hoy", 50) if isinstance(sent, dict) else 50
@@ -517,19 +543,32 @@ async def loop_1h():
                             "BAJISTA" if puntos_bajista > puntos_alcista else "NEUTRAL")
             confianza_ctx = min(50 + max(puntos_alcista, puntos_bajista) * 10, 85)
 
+            # ── BUG FIX: Fear&Greed extremo solo activa volatilidad_alta
+            # si NO fue activada previamente por spike de precio ──────────
+            fg_extremo = fg_valor < 25 or fg_valor > 80
             with _lock_estado:
+                origen_actual = _estado.get("volatilidad_alta_origen", "")
+                # Solo sobreescribe si no hay un spike activo
+                if origen_actual != "spike":
+                    if fg_extremo:
+                        _estado["volatilidad_alta"]        = True
+                        _estado["volatilidad_alta_origen"] = "fear_greed"
+                    else:
+                        _estado["volatilidad_alta"]        = False
+                        _estado["volatilidad_alta_origen"] = ""
+
                 _estado["sesgo_contexto"]     = sesgo
                 _estado["confianza_contexto"] = confianza_ctx
                 _estado["fear_greed"]         = fg_valor
                 _estado["wti_precio"]         = wti
                 _estado["pcr_btc"]            = pcr_btc
-                _estado["volatilidad_alta"]   = fg_valor < 25 or fg_valor > 80
                 _estado["dxy_señal"]          = dxy_señal
                 _estado["dxy_datos"]          = dxy if isinstance(dxy, dict) else {}
 
             print(f"[1H] F&G={fg_valor} | Sesgo={sesgo} ({confianza_ctx}%) | WTI=${wti} | PCR={pcr_btc} | DXY={dxy_señal} | Ballenas={ballenas_señal}")
 
         except Exception as e:
+            log_error("loop_1h", str(e))
             print(f"[1H] Error: {e}")
 
         await asyncio.sleep(3600)
@@ -547,6 +586,12 @@ async def loop_15m():
         print(f"\n{'='*60}")
         print(f"[15M] CICLO TECNICO #{ciclo} — {datetime.now().strftime('%H:%M:%S')}")
         print(f"{'='*60}")
+
+        # Pausa manual
+        if get_estado("sistema_pausado"):
+            print(f"[15M] Sistema pausado manualmente — saltando ciclo")
+            await asyncio.sleep(15 * 60)
+            continue
 
         try:
             horario = debe_operar()
@@ -603,9 +648,11 @@ async def loop_15m():
                             ])
                         )
                 except Exception as e:
+                    log_error("loop_15m_acciones", str(e))
                     print(f"[15M] Error acciones: {e}")
 
         except Exception as e:
+            log_error("loop_15m", str(e))
             print(f"[15M] Error ciclo #{ciclo}: {e}")
             enviar_mensaje(f"⚠️ Error loop 15m #{ciclo}: {str(e)[:100]}")
 
@@ -615,6 +662,7 @@ async def loop_15m():
                 sb.table("señales_trading").select("id").limit(1).execute()
                 print("[15M] Ping Supabase OK")
             except Exception as e:
+                log_error("ping_supabase", str(e))
                 print(f"[15M] Ping Supabase error: {e}")
 
         await asyncio.sleep(15 * 60)
@@ -630,14 +678,17 @@ async def loop_2m():
             ciclo = _estado["ciclo_2m"]
 
         try:
+            # Pausa manual
+            if get_estado("sistema_pausado"):
+                await asyncio.sleep(2 * 60)
+                continue
+
             horario = debe_operar()
             if not horario["operar"]:
                 await asyncio.sleep(2 * 60)
                 continue
 
-            # Reset automático de volatilidad_alta
             evaluar_reset_volatilidad()
-
             conservador    = evaluar_modo_conservador()
             params         = obtener_parametros_ejecucion()
             sesgo_ctx      = get_estado("sesgo_contexto") or "NEUTRAL"
@@ -650,7 +701,6 @@ async def loop_2m():
             vol_txt  = " | 🚨 VOL_ALTA" if vol_alta else ""
             print(f"[2M] Ciclo #{ciclo} — {datetime.now().strftime('%H:%M:%S')} | {modo_txt}{vol_txt} | Sesgo={sesgo_ctx} | DXY={dxy_señal} | 🐋={ballenas_señal}")
 
-            # ── Protección de capital ─────────────────────────────
             try:
                 cerradas = await asyncio.to_thread(monitorear_perdidas_excesivas)
                 for c in cerradas:
@@ -664,14 +714,15 @@ async def loop_2m():
                     if registrar_resultado(c['simbolo'], False):
                         agregar_blacklist(c['simbolo'])
             except Exception as e:
+                log_error("monitor_perdidas", str(e))
                 print(f"[2M] Error monitor pérdidas: {e}")
 
             try:
                 await asyncio.to_thread(monitorear_y_ejecutar_trailing)
             except Exception as e:
+                log_error("trailing", str(e))
                 print(f"[2M] Error trailing: {e}")
 
-            # ── Señales urgentes ──────────────────────────────────
             velas_res, ind_res, of_res, fund_res = await asyncio.gather(
                 analizar_oportunidades(),
                 asyncio.to_thread(analizar_indicadores_completo),
@@ -680,10 +731,18 @@ async def loop_2m():
                 return_exceptions=True
             )
 
-            if isinstance(velas_res, Exception): velas_res = {"oportunidades": [], "alertas": []}
-            if isinstance(ind_res,   Exception): ind_res   = []
-            if isinstance(of_res,    Exception): of_res    = []
-            if isinstance(fund_res,  Exception): fund_res  = []
+            if isinstance(velas_res, Exception):
+                log_error("loop_2m_velas", str(velas_res))
+                velas_res = {"oportunidades": [], "alertas": []}
+            if isinstance(ind_res,   Exception):
+                log_error("loop_2m_indicadores", str(ind_res))
+                ind_res   = []
+            if isinstance(of_res,    Exception):
+                log_error("loop_2m_orderflow", str(of_res))
+                of_res    = []
+            if isinstance(fund_res,  Exception):
+                log_error("loop_2m_funding", str(fund_res))
+                fund_res  = []
 
             if ind_res:
                 await monitorear_volatilidad(ind_res)
@@ -703,8 +762,6 @@ async def loop_2m():
                     continue
                 if any(simbolo in p["simbolo"] for p in posiciones_abiertas):
                     continue
-
-                # Pausa si volatilidad extrema activa
                 if get_estado("volatilidad_alta") and confianza < 95:
                     print(f"[2M] {simbolo} pausado — volatilidad extrema activa")
                     continue
@@ -713,9 +770,9 @@ async def loop_2m():
                 vela_alerta = next((a for a in velas_res["alertas"]       if simbolo in a["simbolo"]), None)
                 señal_velas = "COMPRAR" if vela_op else ("VENDER" if vela_alerta else "NEUTRAL")
 
-                of         = next((o for o in of_res  if o.get("simbolo") == simbolo), {})
-                señal_of   = "COMPRAR" if "COMPRADORA" in of.get("señal","") else (
-                             "VENDER"  if "VENDEDORA"  in of.get("señal","") else "NEUTRAL")
+                of       = next((o for o in of_res  if o.get("simbolo") == simbolo), {})
+                señal_of = "COMPRAR" if "COMPRADORA" in of.get("señal","") else (
+                           "VENDER"  if "VENDEDORA"  in of.get("señal","") else "NEUTRAL")
 
                 fund       = next((f for f in fund_res if f.get("simbolo") == simbolo), {})
                 señal_fund = fund.get("accion", "ESPERAR")
@@ -731,12 +788,10 @@ async def loop_2m():
                 boost_dxy = 0
                 if simbolo == "BTCUSDT" and dxy_señal == señal_ind and dxy_señal != "ESPERAR":
                     boost_dxy = 5
-                    print(f"[2M] DXY confirma señal {señal_ind} para BTCUSDT")
 
                 boost_ballenas = 0
                 if simbolo in ["BTCUSDT", "ETHUSDT"] and ballenas_señal == señal_ind and ballenas_señal != "ESPERAR":
                     boost_ballenas = 5
-                    print(f"[2M] 🐋 Ballenas confirman señal {señal_ind} para {simbolo}")
 
                 votos = sum([
                     señal_velas == señal_ind and señal_ind != "ESPERAR",
@@ -790,9 +845,11 @@ async def loop_2m():
                     if registrar_resultado(simbolo, False):
                         agregar_blacklist(simbolo)
                 else:
+                    log_error("ejecutar_orden", f"{simbolo}: {orden.get('error')}")
                     print(f"[2M] Error orden {simbolo}: {orden.get('error')}")
 
         except Exception as e:
+            log_error("loop_2m", str(e))
             print(f"[2M] Error: {e}")
 
         await asyncio.sleep(2 * 60)
@@ -813,6 +870,7 @@ async def main():
         f"Noticias RSS + DXY + Ballenas activos\n"
         f"Alertas volatilidad >3% + Reset automático 30min\n"
         f"Rate limiter Claude 20/hora activo\n"
+        f"Log de errores activo\n"
         f"Hora: {datetime.now().strftime('%H:%M:%S')}"
     )
     print(f"[main] Telegram: {'OK' if enviado else 'ERROR'}")

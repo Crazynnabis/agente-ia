@@ -47,10 +47,13 @@ async def procesar_comando(comando: str) -> str:
     if cmd == "/status":
         try:
             from agente_financiero.ejecutor_alpaca import obtener_portafolio, obtener_posiciones
+            from loop_automatico import get_estado
             portafolio = obtener_portafolio()
             posiciones = obtener_posiciones()
             pnl        = portafolio.get("pnl_dia", 0)
             emoji_pnl  = "📈" if pnl >= 0 else "📉"
+            pausado    = get_estado("sistema_pausado")
+            emoji_sys  = "⏸️ PAUSADO" if pausado else "🟢 Activo"
             return (
                 f"📊 <b>Estado del sistema</b>\n"
                 f"━━━━━━━━━━━━━━━━━━\n"
@@ -60,7 +63,7 @@ async def procesar_comando(comando: str) -> str:
                 f"{emoji_pnl} P&L hoy: ${pnl:,.2f}\n"
                 f"Posiciones abiertas: {len(posiciones)}\n"
                 f"━━━━━━━━━━━━━━━━━━\n"
-                f"🟢 Sistema activo\n"
+                f"{emoji_sys}\n"
                 f"⏰ {datetime.now().strftime('%H:%M:%S')}"
             )
         except Exception as e:
@@ -154,21 +157,95 @@ async def procesar_comando(comando: str) -> str:
         except Exception as e:
             return f"Error obteniendo señales: {e}"
 
+    # ── /pausa ───────────────────────────────────────────────
+    elif cmd == "/pausa":
+        try:
+            from loop_automatico import set_estado, get_estado
+            import time
+            if get_estado("sistema_pausado"):
+                return "⏸️ El sistema ya está pausado\nUsa /reanudar para continuar"
+            set_estado("sistema_pausado", True)
+            set_estado("sistema_pausado_ts", time.time())
+            print(f"[telegram_cmd] Sistema pausado manualmente")
+            return (
+                f"⏸️ <b>Sistema pausado</b>\n"
+                f"━━━━━━━━━━━━━━━━━━\n"
+                f"Los loops 15m y 2m están detenidos\n"
+                f"Las posiciones abiertas siguen monitoreadas\n"
+                f"El cierre automático >5% sigue activo\n"
+                f"━━━━━━━━━━━━━━━━━━\n"
+                f"Usa /reanudar para continuar\n"
+                f"⏰ {datetime.now().strftime('%H:%M:%S')}"
+            )
+        except Exception as e:
+            return f"Error pausando sistema: {e}"
+
+    # ── /reanudar ────────────────────────────────────────────
+    elif cmd == "/reanudar":
+        try:
+            from loop_automatico import set_estado, get_estado
+            if not get_estado("sistema_pausado"):
+                return "▶️ El sistema ya está activo\nNo es necesario reanudar"
+            set_estado("sistema_pausado", False)
+            set_estado("sistema_pausado_ts", 0)
+            print(f"[telegram_cmd] Sistema reanudado manualmente")
+            return (
+                f"▶️ <b>Sistema reanudado</b>\n"
+                f"━━━━━━━━━━━━━━━━━━\n"
+                f"Loops 15m y 2m activos\n"
+                f"Buscando señales nuevamente\n"
+                f"⏰ {datetime.now().strftime('%H:%M:%S')}"
+            )
+        except Exception as e:
+            return f"Error reanudando sistema: {e}"
+
+    # ── /errores ─────────────────────────────────────────────
+    elif cmd == "/errores":
+        try:
+            log_file = os.path.join(
+                r'C:\Users\Oscar Hernandez\agente-ia\logs',
+                f"errores_{datetime.now().strftime('%Y%m%d')}.log"
+            )
+            if not os.path.exists(log_file):
+                return "✅ Sin errores registrados hoy"
+
+            with open(log_file, "r", encoding="utf-8") as f:
+                lineas = f.readlines()
+
+            if not lineas:
+                return "✅ Sin errores registrados hoy"
+
+            # Muestra los últimos 10 errores
+            ultimos = lineas[-10:]
+            texto = f"⚠️ <b>Últimos errores ({len(lineas)} total hoy)</b>\n━━━━━━━━━━━━━━━━━━\n"
+            for linea in ultimos:
+                partes = linea.strip().split(" | ")
+                if len(partes) >= 3:
+                    hora   = partes[0].split("T")[1][:8] if "T" in partes[0] else partes[0][:8]
+                    agente = partes[1][:20]
+                    error  = partes[2][:60]
+                    texto += f"⏰ {hora} | {agente}\n{error}\n\n"
+            return texto[:4000]
+        except Exception as e:
+            return f"Error leyendo log: {e}"
+
     # ── /modo ─────────────────────────────────────────────────
     elif cmd == "/modo":
         try:
             from loop_automatico import obtener_info_modo
-            info = obtener_info_modo()
-
+            info        = obtener_info_modo()
             conservador = info["conservador"]
             vol_alta    = info["volatilidad_alta"]
+            pausado     = info.get("pausado", False)
             emoji_modo  = "🌙" if conservador else "☀️"
             modo_txt    = "CONSERVADOR" if conservador else "NORMAL"
             emoji_vol   = "🚨" if vol_alta else "✅"
+            emoji_sys   = "⏸️ PAUSADO" if pausado else "▶️ Activo"
 
             return (
                 f"{emoji_modo} <b>Modo de operación actual</b>\n"
                 f"━━━━━━━━━━━━━━━━━━\n"
+                f"Sistema: {emoji_sys}\n"
                 f"Modo: <b>{modo_txt}</b>\n"
                 f"Hora UTC: {info['hora_utc']:02d}:00\n"
                 f"Próximo cambio: {info['siguiente_cambio']}\n"
@@ -259,6 +336,7 @@ async def procesar_comando(comando: str) -> str:
         try:
             from agente_financiero.ejecutor_alpaca import obtener_portafolio
             from nucleo.cliente_ia import obtener_stats_uso
+            from loop_automatico import get_estado
             errores = []
             ok      = []
 
@@ -299,6 +377,11 @@ async def procesar_comando(comando: str) -> str:
                 ok.append("Ollama local") if r.status_code == 200 else errores.append("Ollama local")
             except:
                 errores.append("Ollama local")
+
+            # Estado del sistema
+            pausado = get_estado("sistema_pausado")
+            if pausado:
+                errores.append("Sistema pausado manualmente")
 
             ok_txt  = "\n".join([f"✅ {x}" for x in ok])
             err_txt = "\n".join([f"❌ {x}" for x in errores])
@@ -346,6 +429,9 @@ async def procesar_comando(comando: str) -> str:
             "/aprendizaje — Reporte de rendimiento por activo\n"
             "/health — Estado de todos los componentes\n"
             "/cerrar SIMBOLO — Cierra posición manualmente\n"
+            "/pausa — Pausar sistema manualmente\n"
+            "/reanudar — Reanudar sistema pausado\n"
+            "/errores — Ver últimos errores del día\n"
             "/help — Esta ayuda"
         )
 
@@ -409,7 +495,6 @@ async def verificar_alerta_uso_claude():
                 f"Usa /uso para monitorear en tiempo real"
             )
             _alerta_uso_enviada = True
-            print(f"[telegram_cmd] Alerta uso Claude enviada — {usadas}/{MAX_LLAMADAS_HORA}")
         elif usadas < ALERTA_USO_UMBRAL and _alerta_uso_enviada:
             _alerta_uso_enviada = False
 
