@@ -8,26 +8,27 @@ from firecrawl import FirecrawlApp
 from dotenv import load_dotenv
 from nucleo.cliente_ia import chat
 
-load_dotenv()
+load_dotenv(r'C:\Users\Oscar Hernandez\.env', override=True)
+load_dotenv(override=False)
 
 def obtener_fear_greed() -> dict:
     try:
-        r = requests.get("https://api.alternative.me/fng/?limit=7", timeout=10)
+        r    = requests.get("https://api.alternative.me/fng/?limit=7", timeout=10)
         data = r.json()["data"]
-        hoy = data[0]
+        hoy  = data[0]
         promedio = sum(int(d["value"]) for d in data) // len(data)
         return {
-            "valor_hoy": int(hoy["value"]),
+            "valor_hoy":     int(hoy["value"]),
             "clasificacion": hoy["value_classification"],
-            "promedio_7dias": promedio,
-            "tendencia": "mejorando" if int(data[0]["value"]) > int(data[-1]["value"]) else "empeorando"
+            "promedio_7dias":promedio,
+            "tendencia":     "mejorando" if int(data[0]["value"]) > int(data[-1]["value"]) else "empeorando",
         }
     except Exception as e:
         return {"error": str(e)}
 
 def obtener_sentimiento_reddit() -> str:
     try:
-        app = FirecrawlApp(api_key=os.getenv("FIRECRAWL_API_KEY"))
+        app      = FirecrawlApp(api_key=os.getenv("FIRECRAWL_API_KEY"))
         resultado = app.scrape("https://www.reddit.com/r/investing/hot/.json", formats=["markdown"])
         return resultado.markdown[:2000]
     except Exception as e:
@@ -35,7 +36,7 @@ def obtener_sentimiento_reddit() -> str:
 
 def obtener_sentimiento_crypto() -> str:
     try:
-        app = FirecrawlApp(api_key=os.getenv("FIRECRAWL_API_KEY"))
+        app      = FirecrawlApp(api_key=os.getenv("FIRECRAWL_API_KEY"))
         resultado = app.scrape("https://coinmarketcap.com/trending-cryptocurrencies/", formats=["markdown"])
         return resultado.markdown[:2000]
     except Exception as e:
@@ -43,11 +44,9 @@ def obtener_sentimiento_crypto() -> str:
 
 async def analizar_sentimiento_mercado() -> dict:
     print("[agente_sentimiento] Obteniendo Fear & Greed Index...")
-    fg = obtener_fear_greed()
-
+    fg     = obtener_fear_greed()
     print("[agente_sentimiento] Scrapeando Reddit...")
     reddit = obtener_sentimiento_reddit()
-
     print("[agente_sentimiento] Scrapeando crypto trending...")
     crypto = obtener_sentimiento_crypto()
 
@@ -75,17 +74,18 @@ Analiza los datos y entrega:
 5. Recomendación: comprar, mantener o vender
 6. Señales de alerta detectadas
 Responde en español, conciso y estructurado.""",
-        max_tokens=800
+        max_tokens=800,
+        agente="agente_sentimiento"
     )
 
     return {
         "fear_greed": fg,
-        "analisis": respuesta["texto"],
-        "modelo": respuesta["modelo"]
+        "analisis":   respuesta["texto"],
+        "modelo":     respuesta["modelo"],
     }
 
 async def obtener_reporte_sentimiento() -> str:
     resultado = await analizar_sentimiento_mercado()
-    fg = resultado.get("fear_greed", {})
-    header = f"Fear & Greed: {fg.get('valor_hoy','N/A')} — {fg.get('clasificacion','N/A')}"
+    fg        = resultado.get("fear_greed", {})
+    header    = f"Fear & Greed: {fg.get('valor_hoy','N/A')} — {fg.get('clasificacion','N/A')}"
     return f"{header}\n\n{resultado.get('analisis','Sin análisis')}"

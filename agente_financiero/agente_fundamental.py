@@ -10,22 +10,22 @@ ACTIVOS = ["AAPL", "NVDA", "MSFT", "TSLA", "SPY", "AMZN", "GOOGL", "META"]
 
 def obtener_fundamentales(simbolo: str) -> dict:
     try:
-        info = yf.Ticker(simbolo).info
-        precio_actual  = info.get("currentPrice")
+        info            = yf.Ticker(simbolo).info
+        precio_actual   = info.get("currentPrice")
         precio_objetivo = info.get("targetMeanPrice")
-        upside = round(((precio_objetivo / precio_actual) - 1) * 100, 1) if precio_actual and precio_objetivo else None
+        upside          = round(((precio_objetivo / precio_actual) - 1) * 100, 1) if precio_actual and precio_objetivo else None
         return {
-            "simbolo":               simbolo,
-            "sector":                info.get("sector", "N/A"),
-            "pe_ratio":              info.get("trailingPE"),
-            "pe_forward":            info.get("forwardPE"),
-            "margen_beneficio":      info.get("profitMargins"),
-            "deuda_equity":          info.get("debtToEquity"),
-            "crecimiento_earnings":  info.get("earningsGrowth"),
-            "recomendacion":         info.get("recommendationKey"),
-            "precio_actual":         precio_actual,
-            "precio_objetivo":       precio_objetivo,
-            "upside":                upside,
+            "simbolo":              simbolo,
+            "sector":               info.get("sector", "N/A"),
+            "pe_ratio":             info.get("trailingPE"),
+            "pe_forward":           info.get("forwardPE"),
+            "margen_beneficio":     info.get("profitMargins"),
+            "deuda_equity":         info.get("debtToEquity"),
+            "crecimiento_earnings": info.get("earningsGrowth"),
+            "recomendacion":        info.get("recommendationKey"),
+            "precio_actual":        precio_actual,
+            "precio_objetivo":      precio_objetivo,
+            "upside":               upside,
         }
     except Exception as e:
         return {"simbolo": simbolo, "error": str(e)}
@@ -45,13 +45,14 @@ async def analizar_fundamental_completo() -> dict:
     respuesta = await chat(
         mensajes=[{"role": "user", "content": "DATOS FUNDAMENTALES:\n" + resumen}],
         system="Eres un analista fundamental experto. Analiza los datos y entrega: 1) Top 3 empresas infravaloradas 2) Mejor salud financiera 3) Mayor crecimiento 4) Sobrevaloradas — precaución 5) Recomendacion comprar/mantener/evitar por empresa. Responde en español conciso y accionable.",
-        max_tokens=800
+        max_tokens=800,
+        agente="agente_fundamental"
     )
 
     return {
         "fundamentales": todos,
         "analisis":      respuesta["texto"],
-        "modelo":        respuesta["modelo"]
+        "modelo":        respuesta["modelo"],
     }
 
 async def obtener_reporte_fundamental() -> str:

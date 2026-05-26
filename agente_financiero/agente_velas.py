@@ -130,14 +130,15 @@ Analiza las oportunidades y entrega recomendaciones SOLO si hay señales claras.
 Para cada señal entrega: precio entrada, stop loss (ATR x2), take profit 1 (ratio 2:1), take profit 2 (ratio 3:1), confianza %.
 Si no hay señales claras responde: SIN_SEÑALES_VELAS
 Responde en español conciso.""",
-        max_tokens=600
+        max_tokens=600,
+        agente="agente_velas"
     )
 
     return {
         "oportunidades":   oportunidades,
         "alertas":         alertas,
         "recomendaciones": respuesta["texto"],
-        "timestamp":       datetime.now().strftime("%H:%M:%S")
+        "timestamp":       datetime.now().strftime("%H:%M:%S"),
     }
 
 async def obtener_reporte_velas() -> str:

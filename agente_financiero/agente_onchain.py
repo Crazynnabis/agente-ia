@@ -9,16 +9,16 @@ from nucleo.cliente_ia import chat
 
 def obtener_datos_blockchain_btc() -> dict:
     try:
-        r  = requests.get("https://mempool.space/api/v1/fees/recommended", timeout=10)
+        r    = requests.get("https://mempool.space/api/v1/fees/recommended", timeout=10)
         fees = r.json()
 
-        r2 = requests.get("https://mempool.space/api/v1/mining/hashrate/3m", timeout=10)
+        r2            = requests.get("https://mempool.space/api/v1/mining/hashrate/3m", timeout=10)
         hashrate_data = r2.json()
 
-        r3 = requests.get("https://mempool.space/api/blocks", timeout=10)
+        r3      = requests.get("https://mempool.space/api/blocks", timeout=10)
         bloques = r3.json()[:5]
 
-        r4 = requests.get("https://api.binance.com/api/v3/ticker/price?symbol=BTCUSDT", timeout=10)
+        r4     = requests.get("https://api.binance.com/api/v3/ticker/price?symbol=BTCUSDT", timeout=10)
         precio = float(r4.json()["price"])
 
         hashrate_actual = hashrate_data.get("currentHashrate", 0) if isinstance(hashrate_data, dict) else 0
@@ -37,8 +37,8 @@ def obtener_datos_blockchain_btc() -> dict:
 
 def obtener_flujo_exchanges() -> dict:
     try:
-        r2 = requests.get("https://api.coingecko.com/api/v3/global", timeout=10)
-        global_data    = r2.json().get("data", {})
+        r2          = requests.get("https://api.coingecko.com/api/v3/global", timeout=10)
+        global_data = r2.json().get("data", {})
         dominancia_btc = global_data.get("market_cap_percentage", {}).get("btc", 0)
         dominancia_eth = global_data.get("market_cap_percentage", {}).get("eth", 0)
         volumen_total  = global_data.get("total_volume", {}).get("usd", 0)
@@ -56,14 +56,13 @@ def obtener_flujo_exchanges() -> dict:
 
 def obtener_datos_eth() -> dict:
     try:
-        # Gas price via etherscan alternativa gratuita
         r = requests.get(
             "https://api.etherscan.io/api",
             params={"module": "gastracker", "action": "gasoracle"},
             timeout=10
         )
-        gas_data  = r.json().get("result", {})
-        r2        = requests.get("https://api.binance.com/api/v3/ticker/price?symbol=ETHUSDT", timeout=10)
+        gas_data   = r.json().get("result", {})
+        r2         = requests.get("https://api.binance.com/api/v3/ticker/price?symbol=ETHUSDT", timeout=10)
         precio_eth = float(r2.json()["price"])
 
         return {
@@ -154,7 +153,8 @@ Analiza los datos y entrega:
 4. Oportunidades detectadas
 5. Recomendacion: favorable o desfavorable para comprar crypto ahora
 Responde en español, conciso. Maximo 200 palabras.""",
-        max_tokens=400
+        max_tokens=400,
+        agente="agente_onchain"
     )
 
     return {

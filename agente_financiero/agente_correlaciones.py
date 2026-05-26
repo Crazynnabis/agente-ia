@@ -9,32 +9,30 @@ import pandas as pd
 from datetime import datetime, timedelta
 from nucleo.cliente_ia import chat
 
-# Grupos de activos correlacionados
 GRUPOS = {
     "crypto":      ["BTC-USD", "ETH-USD", "SOL-USD", "BNB-USD"],
     "tech":        ["AAPL", "NVDA", "MSFT", "GOOGL", "META", "AMZN"],
     "indices":     ["SPY", "QQQ", "DIA"],
     "commodities": ["GC=F", "CL=F", "SI=F"],
-    "forex":       ["DX-Y.NYB"],  # Indice dolar
+    "forex":       ["DX-Y.NYB"],
 }
 
-# Correlaciones conocidas para contexto
 CORRELACIONES_CONOCIDAS = {
-    "BTC-USD_ETH-USD":   {"correlacion_esperada": 0.85, "relacion": "BTC lidera, ETH sigue con 2-4h de retraso"},
-    "SPY_QQQ":           {"correlacion_esperada": 0.95, "relacion": "QQQ amplifica movimientos de SPY"},
-    "GC=F_DX-Y.NYB":    {"correlacion_esperada": -0.7, "relacion": "Oro sube cuando dolar baja"},
-    "CL=F_DX-Y.NYB":    {"correlacion_esperada": -0.5, "relacion": "Petroleo tiende a bajar con dolar fuerte"},
-    "BTC-USD_SPY":       {"correlacion_esperada": 0.4,  "relacion": "Correlacion moderada en crisis de liquidez"},
+    "BTC-USD_ETH-USD":  {"correlacion_esperada": 0.85, "relacion": "BTC lidera, ETH sigue con 2-4h de retraso"},
+    "SPY_QQQ":          {"correlacion_esperada": 0.95, "relacion": "QQQ amplifica movimientos de SPY"},
+    "GC=F_DX-Y.NYB":   {"correlacion_esperada": -0.7, "relacion": "Oro sube cuando dolar baja"},
+    "CL=F_DX-Y.NYB":   {"correlacion_esperada": -0.5, "relacion": "Petroleo tiende a bajar con dolar fuerte"},
+    "BTC-USD_SPY":      {"correlacion_esperada": 0.4,  "relacion": "Correlacion moderada en crisis de liquidez"},
 }
 
 def obtener_datos_multiples(simbolos: list, dias: int = 60) -> pd.DataFrame:
     fin    = datetime.now()
     inicio = fin - timedelta(days=dias)
-    dfs = {}
+    dfs    = {}
     for simbolo in simbolos:
         try:
             ticker = yf.Ticker(simbolo)
-            df = ticker.history(start=inicio, end=fin)
+            df     = ticker.history(start=inicio, end=fin)
             if not df.empty:
                 dfs[simbolo] = df["Close"]
         except Exception as e:
@@ -42,7 +40,6 @@ def obtener_datos_multiples(simbolos: list, dias: int = 60) -> pd.DataFrame:
     if not dfs:
         return pd.DataFrame()
     combined = pd.DataFrame(dfs)
-    # Rellena fines de semana con ultimo precio disponible
     combined = combined.ffill().bfill()
     combined = combined.dropna()
     return combined
@@ -58,7 +55,7 @@ def detectar_divergencias(df: pd.DataFrame, par: tuple) -> dict:
     s2 = df[par[1]].pct_change().dropna()
     correlacion_historica = float(s1.corr(s2))
     correlacion_reciente  = float(s1[-10:].corr(s2[-10:]))
-    divergencia = correlacion_historica - correlacion_reciente
+    divergencia           = correlacion_historica - correlacion_reciente
     estado = "normal"
     if abs(divergencia) > 0.3:
         if divergencia > 0:
@@ -76,8 +73,8 @@ def detectar_divergencias(df: pd.DataFrame, par: tuple) -> dict:
 def detectar_lider_seguidor(df: pd.DataFrame, simbolo_a: str, simbolo_b: str) -> dict:
     if simbolo_a not in df.columns or simbolo_b not in df.columns:
         return {}
-    rend_a = df[simbolo_a].pct_change().dropna()
-    rend_b = df[simbolo_b].pct_change().dropna()
+    rend_a            = df[simbolo_a].pct_change().dropna()
+    rend_b            = df[simbolo_b].pct_change().dropna()
     correlaciones_lag = {}
     for lag in range(0, 6):
         if lag == 0:
@@ -93,19 +90,16 @@ def detectar_lider_seguidor(df: pd.DataFrame, simbolo_a: str, simbolo_b: str) ->
     else:
         relacion = f"relacion_inversa_con_{mejor_lag}_periodos_lag"
     return {
-        "par":          f"{simbolo_a}/{simbolo_b}",
-        "mejor_lag":    mejor_lag,
-        "correlacion":  correlaciones_lag[mejor_lag],
-        "relacion":     relacion,
-        "lags":         correlaciones_lag,
+        "par":         f"{simbolo_a}/{simbolo_b}",
+        "mejor_lag":   mejor_lag,
+        "correlacion": correlaciones_lag[mejor_lag],
+        "relacion":    relacion,
+        "lags":        correlaciones_lag,
     }
 
 async def analizar_correlaciones_completo() -> dict:
     print("[agente_correlaciones] Descargando datos...")
-    todos_simbolos = []
-    for grupo in GRUPOS.values():
-        todos_simbolos.extend(grupo)
-    todos_simbolos = list(set(todos_simbolos))
+    todos_simbolos = list(set([s for g in GRUPOS.values() for s in g]))
 
     df = obtener_datos_multiples(todos_simbolos, dias=60)
     if df.empty:
@@ -114,7 +108,6 @@ async def analizar_correlaciones_completo() -> dict:
     print("[agente_correlaciones] Calculando matriz de correlacion...")
     matriz = calcular_matriz_correlacion(df)
 
-    # Detecta pares con alta correlacion
     pares_alta_corr = []
     cols = list(matriz.columns)
     for i in range(len(cols)):
@@ -127,9 +120,8 @@ async def analizar_correlaciones_completo() -> dict:
                     "tipo":        "positiva" if corr > 0 else "negativa",
                 })
 
-    # Analiza divergencias en pares clave
     print("[agente_correlaciones] Detectando divergencias...")
-    divergencias = []
+    divergencias   = []
     pares_analizar = [
         ("BTC-USD", "ETH-USD"),
         ("SPY", "QQQ"),
@@ -142,7 +134,6 @@ async def analizar_correlaciones_completo() -> dict:
             if div:
                 divergencias.append(div)
 
-    # Detecta lideres y seguidores
     print("[agente_correlaciones] Analizando lider/seguidor...")
     lider_seguidor = []
     for par in [("BTC-USD", "ETH-USD"), ("SPY", "QQQ")]:
@@ -151,7 +142,6 @@ async def analizar_correlaciones_completo() -> dict:
             if ls:
                 lider_seguidor.append(ls)
 
-    # Resumen para IA
     resumen_pares = "\n".join([
         f"{p['par']}: correlacion={p['correlacion']} ({p['tipo']})"
         for p in sorted(pares_alta_corr, key=lambda x: abs(x["correlacion"]), reverse=True)[:10]
@@ -176,7 +166,8 @@ Analiza las correlaciones y entrega:
 4. Como usar estas correlaciones para mejorar las entradas de trading
 5. Alertas de correlaciones rotas que indican movimiento inminente
 Responde en español, conciso y accionable para trading.""",
-        max_tokens=800
+        max_tokens=800,
+        agente="agente_correlaciones"
     )
 
     return {

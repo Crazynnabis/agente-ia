@@ -8,7 +8,8 @@ from dotenv import load_dotenv
 from newsapi import NewsApiClient
 from nucleo.cliente_ia import chat
 
-load_dotenv()
+load_dotenv(r'C:\Users\Oscar Hernandez\.env', override=True)
+load_dotenv(override=False)
 
 FUENTES_NOTICIAS = [
     "federal reserve interest rates",
@@ -19,7 +20,7 @@ FUENTES_NOTICIAS = [
 def obtener_noticias_macro() -> str:
     try:
         cliente = NewsApiClient(api_key=os.getenv("NEWS_API_KEY"))
-        todas = []
+        todas   = []
         for query in FUENTES_NOTICIAS:
             r = cliente.get_everything(q=query, language="en", sort_by="publishedAt", page_size=3)
             for a in r.get("articles", []):
@@ -30,7 +31,7 @@ def obtener_noticias_macro() -> str:
 
 def obtener_noticias_web() -> str:
     try:
-        app = FirecrawlApp(api_key=os.getenv("FIRECRAWL_API_KEY"))
+        app      = FirecrawlApp(api_key=os.getenv("FIRECRAWL_API_KEY"))
         resultado = app.scrape("https://www.bbc.com/news/world", formats=["markdown"])
         return resultado.markdown[:2000]
     except Exception as e:
@@ -39,9 +40,8 @@ def obtener_noticias_web() -> str:
 async def analizar_contexto_macro() -> dict:
     print("[agente_macro] Obteniendo noticias macro...")
     noticias = obtener_noticias_macro()
-
     print("[agente_macro] Scrapeando BBC...")
-    web = obtener_noticias_web()
+    web      = obtener_noticias_web()
 
     contexto = f"""
 NOTICIAS MACROECONÓMICAS:
@@ -64,13 +64,14 @@ Analiza las noticias y entrega:
 6. Nivel de riesgo geopolítico: BAJO / MEDIO / ALTO
 7. Impacto esperado en mercados: alcista / bajista / neutral
 Responde en español, conciso y estructurado.""",
-        max_tokens=800
+        max_tokens=800,
+        agente="agente_macro"
     )
 
     return {
         "noticias_count": len(noticias.split("\n")),
-        "analisis": respuesta["texto"],
-        "modelo": respuesta["modelo"]
+        "analisis":       respuesta["texto"],
+        "modelo":         respuesta["modelo"],
     }
 
 async def obtener_reporte_macro() -> str:

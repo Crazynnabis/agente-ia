@@ -27,20 +27,20 @@ def obtener_datos_historicos(simbolo: str, anos: int = 3) -> pd.DataFrame:
 def calcular_estadisticas(df: pd.DataFrame, simbolo: str) -> dict:
     if df.empty:
         return {"simbolo": simbolo, "error": "Sin datos"}
-    precios     = df["Close"]
+    precios      = df["Close"]
     rendimientos = precios.pct_change().dropna()
-    rend_1m  = ((precios.iloc[-1] / precios.iloc[-22])  - 1) * 100 if len(precios) > 22  else None
-    rend_1a  = ((precios.iloc[-1] / precios.iloc[-252]) - 1) * 100 if len(precios) > 252 else None
-    volatilidad = rendimientos.std() * np.sqrt(252) * 100
-    rolling_max = precios.cummax()
+    rend_1m      = ((precios.iloc[-1] / precios.iloc[-22])  - 1) * 100 if len(precios) > 22  else None
+    rend_1a      = ((precios.iloc[-1] / precios.iloc[-252]) - 1) * 100 if len(precios) > 252 else None
+    volatilidad  = rendimientos.std() * np.sqrt(252) * 100
+    rolling_max  = precios.cummax()
     max_drawdown = (((precios - rolling_max) / rolling_max) * 100).min()
     return {
-        "simbolo":          simbolo,
-        "precio_actual":    round(float(precios.iloc[-1]), 2),
-        "rend_1m":          round(float(rend_1m), 2) if rend_1m else None,
-        "rend_1a":          round(float(rend_1a), 2) if rend_1a else None,
-        "volatilidad_anual":round(float(volatilidad), 2),
-        "max_drawdown":     round(float(max_drawdown), 2),
+        "simbolo":           simbolo,
+        "precio_actual":     round(float(precios.iloc[-1]), 2),
+        "rend_1m":           round(float(rend_1m), 2) if rend_1m else None,
+        "rend_1a":           round(float(rend_1a), 2) if rend_1a else None,
+        "volatilidad_anual": round(float(volatilidad), 2),
+        "max_drawdown":      round(float(max_drawdown), 2),
     }
 
 def detectar_patrones(df: pd.DataFrame, simbolo: str) -> dict:
@@ -56,7 +56,12 @@ def detectar_patrones(df: pd.DataFrame, simbolo: str) -> dict:
             patron = "GOLDEN CROSS alcista"
         elif ma50 < ma200 and precio < ma50:
             patron = "DEATH CROSS bajista"
-    return {"simbolo": simbolo, "ma50": round(ma50, 2), "ma200": round(ma200, 2) if ma200 else None, "patron": patron}
+    return {
+        "simbolo": simbolo,
+        "ma50":    round(ma50, 2),
+        "ma200":   round(ma200, 2) if ma200 else None,
+        "patron":  patron,
+    }
 
 async def analizar_historico_completo() -> dict:
     todos_stats    = []
@@ -90,14 +95,15 @@ Analiza y entrega:
 5. Riesgos detectados
 6. Recomendación de asignación de portafolio
 Responde en español, conciso y accionable.""",
-        max_tokens=800
+        max_tokens=800,
+        agente="agente_historico"
     )
 
     return {
         "estadisticas": todos_stats,
         "patrones":     todos_patrones,
         "analisis":     respuesta["texto"],
-        "modelo":       respuesta["modelo"]
+        "modelo":       respuesta["modelo"],
     }
 
 async def obtener_reporte_historico() -> str:
