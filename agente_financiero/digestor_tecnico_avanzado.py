@@ -16,7 +16,6 @@ async def ejecutar_ciclo_avanzado() -> dict:
     timestamp = datetime.now().strftime("%H:%M:%S")
     print(f"\n[digestor_avanzado] Ciclo avanzado {timestamp}")
 
-    # Inicializa tabla antes del gather — evita NameError si gather falla
     tabla           = []
     señales_fuertes = []
 
@@ -162,7 +161,8 @@ DECISION_N:
 - HORIZONTE: 15min o 1hora o 4horas
 Si no hay señales: SIN_SEÑALES_AVANZADAS
 Responde en español sin texto adicional.""",
-        max_tokens=600
+        max_tokens=600,
+        agente="digestor_avanzado"
     )
 
     return {

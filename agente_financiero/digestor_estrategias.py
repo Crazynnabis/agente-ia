@@ -18,14 +18,13 @@ ACTIVOS = ["BTCUSDT", "ETHUSDT", "SOLUSDT", "BNBUSDT",
            "AAPL", "NVDA", "MSFT", "TSLA", "SPY", "QQQ"]
 
 async def ejecutar_ciclo_estrategias() -> dict:
-    timestamp  = datetime.now().strftime("%H:%M:%S")
-    resultados = []
+    timestamp       = datetime.now().strftime("%H:%M:%S")
+    resultados      = []
     señales_fuertes = []
     print(f"\n[digestor_estrategias] Ciclo estrategias {timestamp}")
 
     print("[1/5] ORB, VWAP, Gap, Mean, News en paralelo...")
 
-    # return_exceptions=True — nunca crashea aunque un agente falle
     res = await asyncio.gather(
         asyncio.to_thread(ejecutar_analisis_orb),
         asyncio.to_thread(ejecutar_vwap_reversion),
@@ -43,11 +42,9 @@ async def ejecutar_ciclo_estrategias() -> dict:
         for r in res
     ]
 
-    # vix_res puede ser dict — manejo especial
     if isinstance(vix_res, Exception):
         vix_res = {"señal": "N/A", "fuerza": "N/A", "accion": "ESPERAR", "error": True}
 
-    # Inicializa tabla PRIMERO — antes de cualquier uso
     tabla = {}
     for activo in ACTIVOS:
         tabla[activo] = {
@@ -62,7 +59,6 @@ async def ejecutar_ciclo_estrategias() -> dict:
             "manipulado": False,
         }
 
-    # Llena tabla con resultados de cada agente
     for r in (orb_res if isinstance(orb_res, list) else []):
         s = r.get("simbolo", "")
         if s in tabla:
@@ -90,14 +86,12 @@ async def ejecutar_ciclo_estrategias() -> dict:
         if s in tabla:
             tabla[s]["news"] = r.get("señal", "ESPERAR")
 
-    # VIX — aplica a QQQ y SPY
     if not vix_res.get("error") and vix_res.get("accion") != "ESPERAR":
         for simbolo in ["QQQ", "SPY"]:
             if simbolo in tabla:
                 tabla[simbolo]["vix"] = vix_res.get("accion", "ESPERAR")
     print(f"[digestor_estrategias] VIX: {vix_res.get('señal','N/A')} | {vix_res.get('fuerza','N/A')}")
 
-    # Arbitraje — aplica a pares
     for r in (arb_res if isinstance(arb_res, list) else []):
         if r.get("fuerza") in ["alta", "muy_alta"]:
             sim_a = r.get("simbolo_a", "")
@@ -107,14 +101,12 @@ async def ejecutar_ciclo_estrategias() -> dict:
             if sim_b in tabla:
                 tabla[sim_b]["arb"] = r.get("accion_b", "ESPERAR")
 
-    # Manipulacion — bloquea activos manipulados
     for r in (manip_res if isinstance(manip_res, list) else []):
         sim = r.get("simbolo", "")
         if r.get("debe_evitar") and sim in tabla:
             tabla[sim]["manipulado"] = True
             print(f"[digestor_estrategias] ALERTA: {sim} manipulado — señales bloqueadas")
 
-    # Calcula confluencia por activo
     for activo, datos in tabla.items():
         señales      = [v for k, v in datos.items() if k not in ["simbolo", "manipulado"] and v is not None]
         votos_compra = señales.count("COMPRAR")
@@ -185,7 +177,8 @@ ESTRATEGIA_N:
 - HORIZONTE: 5min o 15min o 1hora
 Si no hay señales fuertes: SIN_SEÑALES_ESTRATEGIAS
 Responde en español sin texto adicional.""",
-        max_tokens=600
+        max_tokens=600,
+        agente="digestor_estrategias"
     )
 
     return {
