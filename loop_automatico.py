@@ -5,10 +5,8 @@ import asyncio
 import time
 from threading import Lock
 
-
 from dotenv import load_dotenv
 load_dotenv(override=True)
-
 
 from datetime import datetime, timezone
 from supabase import create_client
@@ -30,9 +28,8 @@ from agente_financiero.telegram_comandos import escuchar_comandos
 
 ACTIVOS_CRYPTO       = ["BTCUSDT", "ETHUSDT", "SOLUSDT", "BNBUSDT"]
 UMBRAL_VOLATILIDAD   = 3.0
-TTL_VOLATILIDAD_ALTA = 1800  # 30 minutos
+TTL_VOLATILIDAD_ALTA = 1800
 
-# Archivo de log de errores
 LOG_ERRORES = os.path.join(
     os.path.join(os.path.dirname(os.path.abspath(__file__)), 'logs'),
     f"errores_{datetime.now().strftime('%Y%m%d')}.log"
@@ -58,7 +55,7 @@ _estado = {
     "perdidas_consecutivas":   {},
     "volatilidad_alta":        False,
     "volatilidad_alta_ts":     0,
-    "volatilidad_alta_origen": "",  # "spike" o "fear_greed"
+    "volatilidad_alta_origen": "",
     "ciclo_4h":                0,
     "ciclo_1h":                0,
     "ciclo_15m":               0,
@@ -70,7 +67,7 @@ _estado = {
     "precios_anteriores":      {},
     "ballenas_señal":          "ESPERAR",
     "ballenas_ts":             0,
-    "sistema_pausado":         False,  # pausa manual via Telegram
+    "sistema_pausado":         False,
     "sistema_pausado_ts":      0,
 }
 
@@ -80,13 +77,60 @@ gestor = GestorRiesgo()
 # LOG DE ERRORES
 # ============================================================
 def log_error(agente: str, error: str):
-    """Guarda errores en archivo para análisis posterior."""
     try:
         os.makedirs(os.path.dirname(LOG_ERRORES), exist_ok=True)
         with open(LOG_ERRORES, "a", encoding="utf-8") as f:
             f.write(f"{datetime.now().isoformat()} | {agente} | {error}\n")
     except:
         pass
+
+# ============================================================
+# SUPABASE — Guarda portafolio y posiciones
+# ============================================================
+async def guardar_estado_supabase():
+    """Guarda portafolio y posiciones en Supabase para el dashboard."""
+    try:
+        sb         = create_client(os.getenv("SUPABASE_URL"), os.getenv("SUPABASE_KEY"))
+        portafolio = await asyncio.to_thread(obtener_portafolio)
+        posiciones = await asyncio.to_thread(obtener_posiciones)
+
+        # Upsert portafolio — siempre id=1, un solo registro actualizado
+        sb.table("portafolio").upsert({
+            "id":           1,
+            "timestamp":    datetime.now().isoformat(),
+            "capital_total":portafolio.get("capital_total", 0),
+            "equity":       portafolio.get("equity", 0),
+            "cash":         portafolio.get("cash", 0),
+            "pnl_dia":      portafolio.get("pnl_dia", 0),
+            "buying_power": portafolio.get("buying_power", 0),
+            "sesgo":        get_estado("sesgo_contexto") or "NEUTRAL",
+            "fear_greed":   get_estado("fear_greed") or 50,
+            "dxy_señal":    get_estado("dxy_señal") or "ESPERAR",
+            "ballenas":     get_estado("ballenas_señal") or "ESPERAR",
+            "modo":         "conservador" if get_estado("modo_conservador") else "normal",
+            "vol_alta":     get_estado("volatilidad_alta") or False,
+            "pcr_btc":      get_estado("pcr_btc") or 1.0,
+            "wti":          get_estado("wti_precio") or 0,
+        }).execute()
+
+        # Borra posiciones anteriores e inserta las actuales
+        sb.table("posiciones").delete().neq("id", 0).execute()
+        for p in posiciones:
+            sb.table("posiciones").insert({
+                "timestamp":      datetime.now().isoformat(),
+                "simbolo":        p.get("simbolo", ""),
+                "cantidad":       p.get("cantidad", 0),
+                "precio_entrada": p.get("precio_entrada", 0),
+                "precio_actual":  p.get("precio_actual", 0),
+                "pnl_usd":        p.get("pnl_usd", 0),
+                "pnl_pct":        p.get("pnl_pct", 0),
+            }).execute()
+
+        print(f"[supabase] Portafolio guardado | capital=${portafolio.get('capital_total',0):,.2f} | posiciones={len(posiciones)}")
+
+    except Exception as e:
+        log_error("guardar_supabase", str(e))
+        print(f"[supabase] Error guardando estado: {e}")
 
 # ============================================================
 # UTILIDADES
@@ -151,12 +195,9 @@ def evaluar_modo_conservador():
     return conservador
 
 def evaluar_reset_volatilidad():
-    """Reset automático de volatilidad_alta después de 30 minutos."""
     with _lock_estado:
         if not _estado["volatilidad_alta"]:
             return
-        # Solo resetea si fue activado por spike de precio
-        # Si fue activado por Fear&Greed extremo, el loop_1h lo maneja
         if _estado.get("volatilidad_alta_origen") != "spike":
             return
         ts_activacion = _estado.get("volatilidad_alta_ts", 0)
@@ -283,8 +324,6 @@ async def monitorear_volatilidad(ind_res: list):
                 f"Usa /posiciones para ver tu exposición"
             )
 
-            # Solo activa volatilidad_alta por spikes >= 5%
-            # NO interfiere con el flag de Fear&Greed del loop_1h
             if abs(alerta["cambio_pct"]) >= 5.0:
                 with _lock_estado:
                     _estado["volatilidad_alta"]        = True
@@ -543,12 +582,9 @@ async def loop_1h():
                             "BAJISTA" if puntos_bajista > puntos_alcista else "NEUTRAL")
             confianza_ctx = min(50 + max(puntos_alcista, puntos_bajista) * 10, 85)
 
-            # ── BUG FIX: Fear&Greed extremo solo activa volatilidad_alta
-            # si NO fue activada previamente por spike de precio ──────────
             fg_extremo = fg_valor < 25 or fg_valor > 80
             with _lock_estado:
                 origen_actual = _estado.get("volatilidad_alta_origen", "")
-                # Solo sobreescribe si no hay un spike activo
                 if origen_actual != "spike":
                     if fg_extremo:
                         _estado["volatilidad_alta"]        = True
@@ -587,7 +623,6 @@ async def loop_15m():
         print(f"[15M] CICLO TECNICO #{ciclo} — {datetime.now().strftime('%H:%M:%S')}")
         print(f"{'='*60}")
 
-        # Pausa manual
         if get_estado("sistema_pausado"):
             print(f"[15M] Sistema pausado manualmente — saltando ciclo")
             await asyncio.sleep(15 * 60)
@@ -678,7 +713,6 @@ async def loop_2m():
             ciclo = _estado["ciclo_2m"]
 
         try:
-            # Pausa manual
             if get_estado("sistema_pausado"):
                 await asyncio.sleep(2 * 60)
                 continue
@@ -852,6 +886,9 @@ async def loop_2m():
             log_error("loop_2m", str(e))
             print(f"[2M] Error: {e}")
 
+        # ── Guarda estado en Supabase cada 2 minutos para el dashboard ──
+        await guardar_estado_supabase()
+
         await asyncio.sleep(2 * 60)
 
 # ============================================================
@@ -870,7 +907,7 @@ async def main():
         f"Noticias RSS + DXY + Ballenas activos\n"
         f"Alertas volatilidad >3% + Reset automático 30min\n"
         f"Rate limiter Claude 20/hora activo\n"
-        f"Log de errores activo\n"
+        f"Dashboard Supabase activo\n"
         f"Hora: {datetime.now().strftime('%H:%M:%S')}"
     )
     print(f"[main] Telegram: {'OK' if enviado else 'ERROR'}")
