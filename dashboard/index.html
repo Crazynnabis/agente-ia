@@ -42,8 +42,9 @@
   .metric-label { font-family:var(--mono); font-size:9px; color:var(--text-dim); text-transform:uppercase; letter-spacing:0.15em; margin-bottom:6px; }
   .metric-value { font-family:var(--mono); font-size:22px; font-weight:700; line-height:1; }
   .metric-sub { font-family:var(--mono); font-size:10px; color:var(--text-dim); margin-top:4px; }
-  .positive { color:var(--green) !important; } .negative { color:var(--red) !important; }
-  .neutral { color:var(--accent3) !important; }
+  .positive { color:var(--green) !important; }
+  .negative { color:var(--red) !important; }
+  .neutral  { color:var(--accent3) !important; }
   .main-grid { display:grid; grid-template-columns:1fr 1fr 1fr; gap:16px; margin-bottom:16px; }
   .col-wide { grid-column:span 2; }
   .row-2 { display:grid; grid-template-columns:1fr 1fr; gap:16px; margin-bottom:16px; }
@@ -63,7 +64,7 @@
   .signal-item:last-child { border-bottom:none; }
   .signal-symbol { font-family:var(--mono); font-size:12px; font-weight:700; }
   .signal-action { font-family:var(--mono); font-size:9px; padding:2px 8px; border-radius:3px; }
-  .action-buy { background:rgba(63,185,80,0.15); color:var(--green); border:1px solid rgba(63,185,80,0.3); }
+  .action-buy  { background:rgba(63,185,80,0.15); color:var(--green); border:1px solid rgba(63,185,80,0.3); }
   .action-sell { background:rgba(248,81,73,0.15); color:var(--red); border:1px solid rgba(248,81,73,0.3); }
   .agents-grid { display:grid; grid-template-columns:repeat(7,1fr); gap:6px; }
   .agent-pill { background:rgba(0,255,148,0.05); border:1px solid rgba(0,255,148,0.1); border-radius:4px; padding:6px 4px; text-align:center; }
@@ -87,6 +88,7 @@
   .btn:hover { border-color:var(--accent); color:var(--accent); }
   .loading { font-family:var(--mono); font-size:10px; color:var(--text-dim); text-align:center; padding:16px; }
   .error-msg { font-family:var(--mono); font-size:10px; color:var(--red); text-align:center; padding:8px; }
+  .update-time { font-family:var(--mono); font-size:9px; color:var(--text-dim); }
   @media (max-width:1200px) {
     .metrics-grid { grid-template-columns:repeat(3,1fr); }
     .main-grid { grid-template-columns:1fr; }
@@ -99,7 +101,7 @@
 <body>
 <div class="container">
   <header>
-    <div class="logo">AgenteIA <span>//</span> Trading System v3.0</div>
+    <div class="logo">AgenteIA <span>//</span> Trading System v3.1</div>
     <div class="status-bar">
       <div class="dot"></div>
       <span id="sistema-estado">RAILWAY ACTIVO</span>
@@ -108,12 +110,11 @@
       <span>|</span>
       <span id="horario-badge">-- UTC</span>
       <span>|</span>
-      <span id="claude-uso">Claude: --/20</span>
+      <span id="ultima-actualizacion">Cargando...</span>
       <button class="btn" onclick="cargarTodo()">↻ Refresh</button>
     </div>
   </header>
 
-  <!-- Métricas principales -->
   <div class="metrics-grid">
     <div class="metric-card">
       <div class="metric-label">Capital Total</div>
@@ -123,7 +124,7 @@
     <div class="metric-card">
       <div class="metric-label">P&L del Día</div>
       <div class="metric-value" id="pnl-dia">$--</div>
-      <div class="metric-sub" id="pnl-pct">--</div>
+      <div class="metric-sub" id="pnl-sub">--</div>
     </div>
     <div class="metric-card">
       <div class="metric-label">Posiciones</div>
@@ -147,7 +148,7 @@
     </div>
   </div>
 
-  <!-- Precios en tiempo real -->
+  <!-- Precios tiempo real -->
   <div class="panel" style="margin-bottom:16px">
     <div class="panel-header">
       <span class="panel-title">Precios en Tiempo Real — Binance WebSocket</span>
@@ -203,19 +204,16 @@
   <div class="row-2">
     <div class="panel">
       <div class="panel-header">
-        <span class="panel-title">Posiciones Abiertas — Alpaca</span>
+        <span class="panel-title">Posiciones Abiertas — Supabase</span>
         <span class="panel-badge" id="badge-pos">-- ACTIVAS</span>
       </div>
       <div class="panel-body">
         <table>
           <thead>
-            <tr>
-              <th>Símbolo</th><th>Cant.</th><th>Entrada</th>
-              <th>Actual</th><th>P&L $</th><th>P&L %</th>
-            </tr>
+            <tr><th>Símbolo</th><th>Cant.</th><th>Entrada</th><th>Actual</th><th>P&L $</th><th>P&L %</th></tr>
           </thead>
           <tbody id="tabla-pos">
-            <tr><td colspan="6" class="loading">Conectando a Alpaca...</td></tr>
+            <tr><td colspan="6" class="loading">Cargando posiciones...</td></tr>
           </tbody>
         </table>
       </div>
@@ -227,12 +225,12 @@
         <span class="panel-badge" id="badge-señales">LIVE</span>
       </div>
       <div class="panel-body" id="lista-señales">
-        <div class="loading">Conectando a Supabase...</div>
+        <div class="loading">Cargando señales...</div>
       </div>
     </div>
   </div>
 
-  <!-- Gráficas P&L + Distribución -->
+  <!-- P&L + Distribución -->
   <div class="row-2" style="margin-bottom:16px">
     <div class="panel">
       <div class="panel-header">
@@ -250,19 +248,6 @@
     </div>
   </div>
 
-  <!-- Blacklist -->
-  <div class="panel" style="margin-bottom:16px">
-    <div class="panel-header">
-      <span class="panel-title">Blacklist Activa — Supabase</span>
-      <span class="panel-badge red" id="badge-blacklist">-- BLOQUEADOS</span>
-    </div>
-    <div class="panel-body">
-      <div id="blacklist-contenido" style="font-family:var(--mono);font-size:11px;color:var(--text-dim)">
-        Cargando...
-      </div>
-    </div>
-  </div>
-
   <!-- Agentes -->
   <div class="panel" style="margin-bottom:16px">
     <div class="panel-header">
@@ -276,12 +261,8 @@
 </div>
 
 <script>
-// ─── Configuración ───────────────────────────────────────────
-const ALPACA_HEADERS = {
-  'APCA-API-KEY-ID':     CONFIG.ALPACA_KEY,
-  'APCA-API-SECRET-KEY': CONFIG.ALPACA_SECRET,
-};
-const SUPABASE_HEADERS = {
+const SB_URL     = CONFIG.SUPABASE_URL;
+const SB_HEADERS = {
   'apikey':        CONFIG.SUPABASE_KEY,
   'Authorization': `Bearer ${CONFIG.SUPABASE_KEY}`,
   'Content-Type':  'application/json',
@@ -297,35 +278,33 @@ const AGENTES = [
   'Calendario','Opciones','Estacional'
 ];
 
-let chartPrecio = null;
-let chartPnL    = null;
-let chartDist   = null;
+let chartPrecio   = null;
+let chartPnL      = null;
+let chartDist     = null;
 let simboloActivo = 'BTCUSDT';
-let pnlAcumulado  = [];
+let pnlHistorial  = [];
 
-// ─── Reloj ───────────────────────────────────────────────────
+// ── Reloj ────────────────────────────────────────────────────
 setInterval(() => {
-  const ahora  = new Date();
-  const h      = ahora.getUTCHours();
-  document.getElementById('clock').textContent       = ahora.toLocaleTimeString('es-MX');
-  document.getElementById('horario-badge').textContent = `${String(h).padStart(2,'0')}:${String(ahora.getUTCMinutes()).padStart(2,'0')} UTC`;
+  const ahora = new Date();
+  const h     = ahora.getUTCHours();
+  const m     = ahora.getUTCMinutes();
+  document.getElementById('clock').textContent        = ahora.toLocaleTimeString('es-MX');
+  document.getElementById('horario-badge').textContent= `${String(h).padStart(2,'0')}:${String(m).padStart(2,'0')} UTC`;
   const activo = h >= 8 && h < 22;
-  const modoEl = document.getElementById('ctx-horario');
-  modoEl.textContent  = activo ? '🟢 Sesión activa' : '🔴 Fuera de horario';
-  modoEl.className    = 'ctx-value ' + (activo ? 'positive' : 'negative');
+  const el     = document.getElementById('ctx-horario');
+  el.textContent = activo ? '🟢 Sesión activa' : '🔴 Fuera de horario';
+  el.className   = 'ctx-value ' + (activo ? 'positive' : 'negative');
 }, 1000);
 
-// ─── Agentes grid ────────────────────────────────────────────
+// ── Agentes ──────────────────────────────────────────────────
 function renderAgentes() {
   document.getElementById('agentes-grid').innerHTML = AGENTES.map(a =>
-    `<div class="agent-pill">
-      <div class="agent-name">${a}</div>
-      <div class="agent-status">● ON</div>
-    </div>`
+    `<div class="agent-pill"><div class="agent-name">${a}</div><div class="agent-status">● ON</div></div>`
   ).join('');
 }
 
-// ─── Precios grid ────────────────────────────────────────────
+// ── Precios grid ─────────────────────────────────────────────
 function initPreciosGrid() {
   document.getElementById('precios-grid').innerHTML = ACTIVOS.map(s =>
     `<div class="price-card" id="price-${s}">
@@ -336,7 +315,7 @@ function initPreciosGrid() {
   ).join('');
 }
 
-// ─── WebSocket Binance ───────────────────────────────────────
+// ── WebSocket Binance ────────────────────────────────────────
 function conectarWS() {
   const streams = ACTIVOS.map(s => `${s.toLowerCase()}@ticker`).join('/');
   const ws = new WebSocket(`wss://stream.binance.com:9443/stream?streams=${streams}`);
@@ -362,12 +341,12 @@ function conectarWS() {
   ws.onerror = () => ws.close();
 }
 
-// ─── Gráficas ────────────────────────────────────────────────
+// ── Gráficas ─────────────────────────────────────────────────
 function initGraficas() {
   chartPrecio = new Chart(document.getElementById('chartPrecio').getContext('2d'), {
-    type: 'line',
-    data: { datasets: [{ data:[], borderColor:'#00FF94', backgroundColor:'rgba(0,255,148,0.05)', borderWidth:1.5, pointRadius:0, fill:true, tension:0.1 }] },
-    options: {
+    type:'line',
+    data:{ datasets:[{ data:[], borderColor:'#00FF94', backgroundColor:'rgba(0,255,148,0.05)', borderWidth:1.5, pointRadius:0, fill:true, tension:0.1 }] },
+    options:{
       responsive:true, maintainAspectRatio:false,
       plugins:{ legend:{display:false} },
       scales:{
@@ -378,28 +357,25 @@ function initGraficas() {
   });
 
   chartPnL = new Chart(document.getElementById('chartPnL').getContext('2d'), {
-    type: 'line',
-    data: { datasets: [{ data:[], borderColor:'#3FB950', backgroundColor:'rgba(63,185,80,0.05)', borderWidth:1.5, pointRadius:3, fill:true, tension:0.3, label:'P&L' }] },
-    options: {
+    type:'line',
+    data:{ labels:[], datasets:[{ data:[], borderColor:'#3FB950', backgroundColor:'rgba(63,185,80,0.05)', borderWidth:1.5, pointRadius:2, fill:true, tension:0.3 }] },
+    options:{
       responsive:true, maintainAspectRatio:false,
       plugins:{ legend:{display:false} },
       scales:{
-        x:{ ticks:{color:'#7D8590',font:{family:'Space Mono',size:9},maxRotation:0}, grid:{color:'#1C2333'} },
+        x:{ ticks:{color:'#7D8590',font:{family:'Space Mono',size:9},maxRotation:0,maxTicksLimit:6}, grid:{color:'#1C2333'} },
         y:{ ticks:{color:'#7D8590',font:{family:'Space Mono',size:9}}, grid:{color:'#1C2333'} }
       }
     }
   });
 
   chartDist = new Chart(document.getElementById('chartDistribucion').getContext('2d'), {
-    type: 'doughnut',
-    data: {
-      labels: ['Comprar','Vender','Esperar'],
-      datasets: [{ data:[0,0,0], backgroundColor:['rgba(63,185,80,0.7)','rgba(248,81,73,0.7)','rgba(125,133,144,0.4)'], borderColor:['#3FB950','#F85149','#7D8590'], borderWidth:1 }]
+    type:'doughnut',
+    data:{
+      labels:['Comprar','Vender','Esperar'],
+      datasets:[{ data:[0,0,0], backgroundColor:['rgba(63,185,80,0.7)','rgba(248,81,73,0.7)','rgba(125,133,144,0.4)'], borderColor:['#3FB950','#F85149','#7D8590'], borderWidth:1 }]
     },
-    options: {
-      responsive:true, maintainAspectRatio:false,
-      plugins:{ legend:{position:'right',labels:{color:'#7D8590',font:{family:'Space Mono',size:9},boxWidth:10}} }
-    }
+    options:{ responsive:true, maintainAspectRatio:false, plugins:{ legend:{ position:'right', labels:{color:'#7D8590',font:{family:'Space Mono',size:9},boxWidth:10} } } }
   });
 }
 
@@ -410,7 +386,7 @@ async function cargarGraficaPrecio(simbolo) {
     chartPrecio.data.datasets[0].data = data.map(k => ({ x:new Date(k[0]), y:parseFloat(k[4]) }));
     document.getElementById('chart-title').textContent = `${simbolo.replace('USDT','/USD')} — 48h`;
     chartPrecio.update('none');
-  } catch(e) { console.error('Error gráfica precio:', e); }
+  } catch(e) { console.error('Error gráfica:', e); }
 }
 
 function cambiarGrafica(simbolo, btn) {
@@ -420,50 +396,92 @@ function cambiarGrafica(simbolo, btn) {
   cargarGraficaPrecio(simbolo);
 }
 
-// ─── Alpaca: Portafolio ──────────────────────────────────────
+// ── Supabase: Portafolio ──────────────────────────────────────
 async function cargarPortafolio() {
   try {
-    const r = await fetch(`${CONFIG.ALPACA_URL}/v2/account`, { headers: ALPACA_HEADERS });
-    if (!r.ok) throw new Error(`Alpaca ${r.status}`);
-    const d        = await r.json();
-    const capital  = parseFloat(d.portfolio_value || 0);
-    const equity   = parseFloat(d.equity || 0);
-    const cash     = parseFloat(d.cash || 0);
-    const pnl      = parseFloat(d.unrealized_pl || 0);
-    const pnlPct   = capital > 0 ? (pnl / capital * 100).toFixed(2) : 0;
+    const r = await fetch(`${SB_URL}/rest/v1/portafolio?id=eq.1`, { headers: SB_HEADERS });
+    if (!r.ok) throw new Error(`Supabase ${r.status}`);
+    const data = await r.json();
+    if (!data.length) {
+      document.getElementById('capital').textContent = 'Sin datos';
+      return;
+    }
+    const d       = data[0];
+    const capital = parseFloat(d.capital_total || 0);
+    const equity  = parseFloat(d.equity || 0);
+    const cash    = parseFloat(d.cash || 0);
+    const pnl     = parseFloat(d.pnl_dia || 0);
+    const pnlPct  = capital > 0 ? (pnl / capital * 100).toFixed(2) : 0;
 
-    document.getElementById('capital').textContent    = `$${capital.toLocaleString('en-US',{minimumFractionDigits:2})}`;
-    document.getElementById('equity').textContent     = `Equity: $${equity.toLocaleString('en-US',{minimumFractionDigits:2})}`;
-    document.getElementById('cash-disp').textContent  = `Cash: $${cash.toLocaleString('en-US',{minimumFractionDigits:2})}`;
-    document.getElementById('pnl-dia').textContent    = `${pnl>=0?'+':''}$${pnl.toLocaleString('en-US',{minimumFractionDigits:2})}`;
-    document.getElementById('pnl-dia').className      = `metric-value ${pnl>=0?'positive':'negative'}`;
-    document.getElementById('pnl-pct').textContent    = `${pnlPct>=0?'+':''}${pnlPct}%`;
+    document.getElementById('capital').textContent   = `$${capital.toLocaleString('en-US',{minimumFractionDigits:2})}`;
+    document.getElementById('equity').textContent    = `Equity: $${equity.toLocaleString('en-US',{minimumFractionDigits:2})}`;
+    document.getElementById('cash-disp').textContent = `Cash: $${cash.toLocaleString('en-US',{minimumFractionDigits:2})}`;
+    document.getElementById('pnl-dia').textContent   = `${pnl>=0?'+':''}$${pnl.toLocaleString('en-US',{minimumFractionDigits:2})}`;
+    document.getElementById('pnl-dia').className     = `metric-value ${pnl>=0?'positive':'negative'}`;
+    document.getElementById('pnl-sub').textContent   = `${pnlPct>=0?'+':''}${pnlPct}%`;
     document.getElementById('pnl-total-badge').textContent = `${pnl>=0?'+':''}$${pnl.toFixed(2)}`;
 
+    // Contexto del loop
+    const sesgo = d.sesgo || 'NEUTRAL';
+    const sesgoCls = sesgo==='BAJISTA'?'negative':sesgo==='ALCISTA'?'positive':'neutral';
+    document.getElementById('ctx-sesgo').textContent  = sesgo;
+    document.getElementById('ctx-sesgo').className    = `ctx-value ${sesgoCls}`;
+    document.getElementById('sesgo-badge').textContent= sesgo;
+
+    const fg = parseInt(d.fear_greed || 50);
+    document.getElementById('fg-num').textContent       = fg;
+    document.getElementById('fg-valor-big').textContent = fg;
+    document.getElementById('fg-fill').style.width      = `${fg}%`;
+    const fgCls = fg<30?'negative':fg>60?'positive':'neutral';
+    document.getElementById('fg-num').className         = `metric-value ${fgCls}`;
+    document.getElementById('fg-valor-big').className   = fgCls;
+    const fgLabel = fg<20?'Miedo Extremo':fg<40?'Miedo':fg<60?'Neutral':fg<80?'Codicia':'Codicia Extrema';
+    document.getElementById('fg-label').textContent     = fgLabel;
+    document.getElementById('fg-clasif').textContent    = fgLabel;
+
+    document.getElementById('ctx-dxy').textContent      = d.dxy_señal || 'ESPERAR';
+    document.getElementById('ctx-ballenas').textContent = d.ballenas || 'ESPERAR';
+    document.getElementById('ctx-pcr').textContent      = parseFloat(d.pcr_btc||1).toFixed(3);
+    document.getElementById('ctx-wti').textContent      = d.wti ? `$${parseFloat(d.wti).toFixed(2)}` : '--';
+
+    const modo = d.modo || 'normal';
+    const modoEl = document.getElementById('ctx-modo');
+    modoEl.textContent = modo==='conservador' ? '🌙 Conservador' : '☀️ Normal';
+    modoEl.className   = `ctx-value ${modo==='conservador'?'neutral':'positive'}`;
+
+    const volEl = document.getElementById('ctx-vol');
+    volEl.textContent = d.vol_alta ? '🚨 SÍ — pausando señales' : '✅ Normal';
+    volEl.className   = `ctx-value ${d.vol_alta?'negative':'positive'}`;
+
+    // Actualiza timestamp
+    const ts = new Date(d.timestamp);
+    document.getElementById('ultima-actualizacion').textContent =
+      `Actualizado: ${ts.toLocaleTimeString('es-MX')}`;
+
     // P&L chart
-    const hora = new Date().toLocaleTimeString('es-MX',{hour:'2-digit',minute:'2-digit'});
-    pnlAcumulado.push({ x:hora, y:pnl });
-    if (pnlAcumulado.length > 48) pnlAcumulado.shift();
-    chartPnL.data.labels                  = pnlAcumulado.map(p => p.x);
-    chartPnL.data.datasets[0].data        = pnlAcumulado.map(p => p.y);
-    chartPnL.data.datasets[0].borderColor = pnl >= 0 ? '#3FB950' : '#F85149';
+    const hora = ts.toLocaleTimeString('es-MX',{hour:'2-digit',minute:'2-digit'});
+    pnlHistorial.push({ x:hora, y:pnl });
+    if (pnlHistorial.length > 48) pnlHistorial.shift();
+    chartPnL.data.labels             = pnlHistorial.map(p => p.x);
+    chartPnL.data.datasets[0].data   = pnlHistorial.map(p => p.y);
+    chartPnL.data.datasets[0].borderColor = pnl>=0?'#3FB950':'#F85149';
     chartPnL.update('none');
 
   } catch(e) {
-    console.error('Error Alpaca portafolio:', e);
-    document.getElementById('capital').textContent = 'Error API';
+    console.error('Error portafolio Supabase:', e);
+    document.getElementById('capital').textContent = 'Error Supabase';
   }
 }
 
-// ─── Alpaca: Posiciones ──────────────────────────────────────
+// ── Supabase: Posiciones ──────────────────────────────────────
 async function cargarPosiciones() {
   try {
-    const r    = await fetch(`${CONFIG.ALPACA_URL}/v2/positions`, { headers: ALPACA_HEADERS });
-    if (!r.ok) throw new Error(`Alpaca ${r.status}`);
+    const r    = await fetch(`${SB_URL}/rest/v1/posiciones?order=simbolo.asc`, { headers: SB_HEADERS });
+    if (!r.ok) throw new Error(`Supabase ${r.status}`);
     const data = await r.json();
 
-    document.getElementById('num-pos').textContent    = data.length;
-    document.getElementById('badge-pos').textContent  = `${data.length} ACTIVAS`;
+    document.getElementById('num-pos').textContent   = data.length;
+    document.getElementById('badge-pos').textContent = `${data.length} ACTIVAS`;
 
     const tbody = document.getElementById('tabla-pos');
     if (!data.length) {
@@ -471,56 +489,56 @@ async function cargarPosiciones() {
       return;
     }
     tbody.innerHTML = data.map(p => {
-      const pnl    = parseFloat(p.unrealized_pl || 0);
-      const pnlPct = parseFloat(p.unrealized_plpc || 0) * 100;
+      const pnl    = parseFloat(p.pnl_usd || 0);
+      const pnlPct = parseFloat(p.pnl_pct || 0);
       const cls    = pnl >= 0 ? 'positive' : 'negative';
       return `<tr>
-        <td><strong>${p.symbol}</strong></td>
-        <td>${parseFloat(p.qty).toFixed(4)}</td>
-        <td>$${parseFloat(p.avg_entry_price).toLocaleString('en-US',{minimumFractionDigits:2})}</td>
-        <td>$${parseFloat(p.current_price).toLocaleString('en-US',{minimumFractionDigits:2})}</td>
+        <td><strong>${p.simbolo}</strong></td>
+        <td>${parseFloat(p.cantidad||0).toFixed(4)}</td>
+        <td>$${parseFloat(p.precio_entrada||0).toLocaleString('en-US',{minimumFractionDigits:2})}</td>
+        <td>$${parseFloat(p.precio_actual||0).toLocaleString('en-US',{minimumFractionDigits:2})}</td>
         <td class="${cls}">${pnl>=0?'+':''}$${pnl.toFixed(2)}</td>
         <td class="${cls}">${pnlPct>=0?'+':''}${pnlPct.toFixed(2)}%</td>
       </tr>`;
     }).join('');
   } catch(e) {
-    console.error('Error Alpaca posiciones:', e);
-    document.getElementById('tabla-pos').innerHTML = `<tr><td colspan="6" class="error-msg">Error conectando a Alpaca</td></tr>`;
+    console.error('Error posiciones:', e);
+    document.getElementById('tabla-pos').innerHTML = '<tr><td colspan="6" class="error-msg">Error cargando posiciones</td></tr>';
   }
 }
 
-// ─── Supabase: Señales ───────────────────────────────────────
+// ── Supabase: Señales ─────────────────────────────────────────
 async function cargarSeñales() {
   try {
-    const hoy   = new Date().toISOString().split('T')[0];
-    const url   = `${CONFIG.SUPABASE_URL}/rest/v1/señales_trading?timestamp=gte.${hoy}&order=timestamp.desc&limit=50`;
-    const r     = await fetch(url, { headers: SUPABASE_HEADERS });
+    const hoy = new Date().toISOString().split('T')[0];
+    const r   = await fetch(
+      `${SB_URL}/rest/v1/señales_trading?timestamp=gte.${hoy}&order=timestamp.desc&limit=50`,
+      { headers: SB_HEADERS }
+    );
     if (!r.ok) throw new Error(`Supabase ${r.status}`);
-    const data  = await r.json();
+    const data = await r.json();
 
     const total   = data.length;
-    const ordenes = data.filter(s => s.ejecutada).length;
-    const ganadas = data.filter(s => s.resultado === 'ganancia').length;
-    const perdidas= data.filter(s => s.resultado === 'perdida').length;
+    const compras = data.filter(s => s.accion==='COMPRAR').length;
+    const ventas  = data.filter(s => s.accion==='VENDER').length;
+    const ganadas = data.filter(s => s.resultado==='ganancia').length;
+    const perdidas= data.filter(s => s.resultado==='perdida').length;
     const cierres = ganadas + perdidas;
-    const winRate = cierres > 0 ? Math.round(ganadas / cierres * 100) : 0;
-    const compras = data.filter(s => s.accion === 'COMPRAR').length;
-    const ventas  = data.filter(s => s.accion === 'VENDER').length;
+    const winRate = cierres > 0 ? Math.round(ganadas/cierres*100) : 0;
 
-    document.getElementById('señales-hoy').textContent   = total;
-    document.getElementById('ordenes-hoy').textContent   = `Órdenes: ${ordenes}`;
-    document.getElementById('win-rate').textContent      = `${winRate}%`;
-    document.getElementById('win-rate').className        = `metric-value ${winRate>=50?'positive':winRate>0?'neutral':'negative'}`;
-    document.getElementById('trades-hoy').textContent    = `G: ${ganadas} | P: ${perdidas}`;
+    document.getElementById('señales-hoy').textContent  = total;
+    document.getElementById('ordenes-hoy').textContent  = `Ejecutadas: ${data.filter(s=>s.aprobada_riesgo).length}`;
+    document.getElementById('win-rate').textContent     = `${winRate}%`;
+    document.getElementById('win-rate').className       = `metric-value ${winRate>=50?'positive':winRate>0?'neutral':'negative'}`;
+    document.getElementById('trades-hoy').textContent   = `G: ${ganadas} | P: ${perdidas}`;
 
-    chartDist.data.datasets[0].data = [compras, ventas, total - compras - ventas];
+    chartDist.data.datasets[0].data = [compras, ventas, total-compras-ventas];
     chartDist.update();
 
-    // Lista señales recientes
     if (data.length) {
       document.getElementById('lista-señales').innerHTML = data.slice(0,8).map(s => {
         const hora = (s.timestamp||'').slice(11,16);
-        const cls  = s.accion === 'COMPRAR' ? 'action-buy' : 'action-sell';
+        const cls  = s.accion==='COMPRAR' ? 'action-buy' : 'action-sell';
         return `<div class="signal-item">
           <span class="signal-symbol">${s.simbolo||'--'}</span>
           <span class="signal-action ${cls}">${s.accion||'--'}</span>
@@ -533,109 +551,48 @@ async function cargarSeñales() {
     }
 
   } catch(e) {
-    console.error('Error Supabase señales:', e);
-    document.getElementById('lista-señales').innerHTML = '<div class="error-msg">Error conectando a Supabase</div>';
+    console.error('Error señales:', e);
+    document.getElementById('lista-señales').innerHTML = '<div class="error-msg">Error cargando señales</div>';
   }
 }
 
-// ─── Supabase: Blacklist ─────────────────────────────────────
-async function cargarBlacklist() {
-  try {
-    const url  = `${CONFIG.SUPABASE_URL}/rest/v1/blacklist?order=ts_desbloqueo.asc`;
-    const r    = await fetch(url, { headers: SUPABASE_HEADERS });
-    if (!r.ok) throw new Error(`Supabase ${r.status}`);
-    const data = await r.json();
-    const ahora = Date.now() / 1000;
-    const activos = data.filter(b => b.ts_desbloqueo > ahora);
-
-    document.getElementById('badge-blacklist').textContent = `${activos.length} BLOQUEADOS`;
-
-    if (!activos.length) {
-      document.getElementById('blacklist-contenido').innerHTML = '<span style="color:var(--green)">✅ Ningún activo bloqueado</span>';
-      return;
-    }
-
-    document.getElementById('blacklist-contenido').innerHTML = activos.map(b => {
-      const restante = b.ts_desbloqueo - ahora;
-      const horas    = Math.floor(restante / 3600);
-      const minutos  = Math.floor((restante % 3600) / 60);
-      return `<span style="color:var(--red);margin-right:16px">🚫 ${b.simbolo} — ${horas}h ${minutos}m</span>`;
-    }).join('');
-
-  } catch(e) {
-    document.getElementById('blacklist-contenido').innerHTML = '<span style="color:var(--text-dim)">Sin datos de blacklist</span>';
-  }
-}
-
-// ─── Fear & Greed ────────────────────────────────────────────
+// ── Fear & Greed independiente ────────────────────────────────
 async function cargarFearGreed() {
   try {
     const r    = await fetch('https://api.alternative.me/fng/?limit=1');
     const data = await r.json();
     const fg   = parseInt(data.data[0].value);
     const label= data.data[0].value_classification;
-
-    document.getElementById('fg-num').textContent       = fg;
-    document.getElementById('fg-label').textContent     = label;
-    document.getElementById('fg-valor-big').textContent = fg;
-    document.getElementById('fg-clasif').textContent    = label;
-    document.getElementById('fg-fill').style.width      = `${fg}%`;
-
-    const cls = fg < 30 ? 'negative' : fg > 60 ? 'positive' : 'neutral';
-    document.getElementById('fg-num').className         = `metric-value ${cls}`;
-    document.getElementById('fg-valor-big').className   = cls;
-
-    // Sesgo basado en F&G
-    const sesgo = fg < 35 ? 'BAJISTA' : fg > 60 ? 'ALCISTA' : 'NEUTRAL';
-    const sesgoCls = sesgo === 'BAJISTA' ? 'negative' : sesgo === 'ALCISTA' ? 'positive' : 'neutral';
-    document.getElementById('ctx-sesgo').textContent  = sesgo;
-    document.getElementById('ctx-sesgo').className    = `ctx-value ${sesgoCls}`;
-    document.getElementById('sesgo-badge').textContent = sesgo;
-
-  } catch(e) { console.error('Error Fear&Greed:', e); }
+    // Solo actualiza si Supabase no tiene datos aún
+    if (document.getElementById('fg-num').textContent === '--') {
+      document.getElementById('fg-num').textContent       = fg;
+      document.getElementById('fg-label').textContent     = label;
+      document.getElementById('fg-valor-big').textContent = fg;
+      document.getElementById('fg-clasif').textContent    = label;
+      document.getElementById('fg-fill').style.width      = `${fg}%`;
+    }
+  } catch(e) { console.error('Error F&G:', e); }
 }
 
-// ─── Contexto adicional ──────────────────────────────────────
-function actualizarContexto() {
-  const h = new Date().getUTCHours();
-
-  // Modo conservador
-  const conservador = h < 8;
-  const modoEl = document.getElementById('ctx-modo');
-  modoEl.textContent = conservador ? '🌙 Conservador' : '☀️ Normal';
-  modoEl.className   = `ctx-value ${conservador ? 'neutral' : 'positive'}`;
-
-  // DXY y ballenas — datos estáticos hasta que vengan de Railway
-  document.getElementById('ctx-dxy').textContent      = 'Via Railway';
-  document.getElementById('ctx-ballenas').textContent = 'Via Railway';
-  document.getElementById('ctx-pcr').textContent      = 'Via Railway';
-  document.getElementById('ctx-wti').textContent      = 'Via Railway';
-  document.getElementById('ctx-vol').textContent      = conservador ? '⚠️ Monitor activo' : '✅ Normal';
-}
-
-// ─── Carga completa ──────────────────────────────────────────
+// ── Carga completa ────────────────────────────────────────────
 async function cargarTodo() {
   await Promise.all([
     cargarPortafolio(),
     cargarPosiciones(),
     cargarSeñales(),
-    cargarBlacklist(),
     cargarFearGreed(),
   ]);
-  actualizarContexto();
   await cargarGraficaPrecio(simboloActivo);
 }
 
-// ─── Init ────────────────────────────────────────────────────
+// ── Init ──────────────────────────────────────────────────────
 renderAgentes();
 initPreciosGrid();
 initGraficas();
 conectarWS();
 cargarTodo();
 
-// Auto-refresh cada 30 segundos
 setInterval(cargarTodo, 30000);
-// Gráfica precio cada minuto
 setInterval(() => cargarGraficaPrecio(simboloActivo), 60000);
 </script>
 </body>
