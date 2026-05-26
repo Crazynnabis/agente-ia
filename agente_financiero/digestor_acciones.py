@@ -56,12 +56,12 @@ def calcular_indicadores_accion(df: pd.DataFrame) -> dict:
     vwap          = float((precio_tipico * df["Volume"]).cumsum().iloc[-1] / df["Volume"].cumsum().iloc[-1])
 
     # MA
-    ma20  = round(float(np.mean(closes[-20:])), 4)
-    ma50  = round(float(np.mean(closes[-50:])), 4) if len(closes) >= 50 else ma20
+    ma20 = round(float(np.mean(closes[-20:])), 4)
+    ma50 = round(float(np.mean(closes[-50:])), 4) if len(closes) >= 50 else ma20
 
     # ATR
-    trs  = [max(highs[i]-lows[i], abs(highs[i]-closes[i-1]), abs(lows[i]-closes[i-1])) for i in range(1, min(15, len(closes)))]
-    atr  = round(float(np.mean(trs)), 4)
+    trs = [max(highs[i]-lows[i], abs(highs[i]-closes[i-1]), abs(lows[i]-closes[i-1])) for i in range(1, min(15, len(closes)))]
+    atr = round(float(np.mean(trs)), 4)
 
     # Volumen vs promedio
     vol_actual = float(volumes[-1])
@@ -69,25 +69,25 @@ def calcular_indicadores_accion(df: pd.DataFrame) -> dict:
     ratio_vol  = round(vol_actual / vol_prom, 2) if vol_prom > 0 else 1.0
 
     # Cambios
-    cambio_1d  = round(((precio - closes[-2]) / closes[-2]) * 100, 3) if len(closes) > 1 else 0
-    cambio_5d  = round(((precio - closes[-min(len(closes),78)]) / closes[-min(len(closes),78)]) * 100, 3)
+    cambio_1d = round(((precio - closes[-2]) / closes[-2]) * 100, 3) if len(closes) > 1 else 0
+    cambio_5d = round(((precio - closes[-min(len(closes),78)]) / closes[-min(len(closes),78)]) * 100, 3)
 
     return {
-        "precio":      round(precio, 4),
-        "rsi":         rsi,
-        "vwap":        round(vwap, 4),
-        "ma20":        ma20,
-        "ma50":        ma50,
-        "atr":         atr,
-        "ratio_vol":   ratio_vol,
-        "cambio_1d":   cambio_1d,
-        "cambio_5d":   cambio_5d,
-        "sl_largo":    round(precio - atr * 2.5, 4),
-        "sl_corto":    round(precio + atr * 2.5, 4),
-        "tp1_largo":   round(precio + atr * 5.0, 4),
-        "tp1_corto":   round(precio - atr * 5.0, 4),
-        "tp2_largo":   round(precio + atr * 7.5, 4),
-        "tp2_corto":   round(precio - atr * 7.5, 4),
+        "precio":    round(precio, 4),
+        "rsi":       rsi,
+        "vwap":      round(vwap, 4),
+        "ma20":      ma20,
+        "ma50":      ma50,
+        "atr":       atr,
+        "ratio_vol": ratio_vol,
+        "cambio_1d": cambio_1d,
+        "cambio_5d": cambio_5d,
+        "sl_largo":  round(precio - atr * 2.5, 4),
+        "sl_corto":  round(precio + atr * 2.5, 4),
+        "tp1_largo": round(precio + atr * 5.0, 4),
+        "tp1_corto": round(precio - atr * 5.0, 4),
+        "tp2_largo": round(precio + atr * 7.5, 4),
+        "tp2_corto": round(precio - atr * 7.5, 4),
     }
 
 def analizar_señal_accion(simbolo: str, ind: dict) -> dict:
@@ -142,22 +142,22 @@ def analizar_señal_accion(simbolo: str, ind: dict) -> dict:
         confianza   = max(confianza - 20, 10)
 
     return {
-        "simbolo":      simbolo,
-        "precio":       ind["precio"],
-        "señal_final":  señal_final,
-        "confluencia":  confluencia,
-        "confianza":    confianza,
-        "rsi":          rsi,
-        "vwap":         vwap,
-        "ma20":         ma20,
-        "ma50":         ma50,
-        "cambio_1d":    ind["cambio_1d"],
-        "cambio_5d":    ind["cambio_5d"],
-        "ratio_vol":    ind["ratio_vol"],
-        "stop_loss":    ind["sl_largo"] if señal_final == "COMPRAR" else ind["sl_corto"],
-        "take_profit_1":ind["tp1_largo"] if señal_final == "COMPRAR" else ind["tp1_corto"],
-        "take_profit_2":ind["tp2_largo"] if señal_final == "COMPRAR" else ind["tp2_corto"],
-        "atr":          ind["atr"],
+        "simbolo":       simbolo,
+        "precio":        ind["precio"],
+        "señal_final":   señal_final,
+        "confluencia":   confluencia,
+        "confianza":     confianza,
+        "rsi":           rsi,
+        "vwap":          vwap,
+        "ma20":          ma20,
+        "ma50":          ma50,
+        "cambio_1d":     ind["cambio_1d"],
+        "cambio_5d":     ind["cambio_5d"],
+        "ratio_vol":     ind["ratio_vol"],
+        "stop_loss":     ind["sl_largo"] if señal_final == "COMPRAR" else ind["sl_corto"],
+        "take_profit_1": ind["tp1_largo"] if señal_final == "COMPRAR" else ind["tp1_corto"],
+        "take_profit_2": ind["tp2_largo"] if señal_final == "COMPRAR" else ind["tp2_corto"],
+        "atr":           ind["atr"],
     }
 
 async def ejecutar_ciclo_acciones() -> dict:
@@ -209,7 +209,8 @@ DECISION_ACCION_N:
 - HORIZONTE: intradía o swing
 Si no hay señales: SIN_SEÑALES_ACCIONES
 Responde en español sin texto adicional.""",
-        max_tokens=600
+        max_tokens=600,
+        agente="digestor_acciones"
     )
 
     return {
