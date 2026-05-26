@@ -5,10 +5,10 @@ import asyncio
 import time
 from threading import Lock
 
-os.environ["DOTENV_PATH"] = r'C:\Users\Oscar Hernandez\.env'
+
 from dotenv import load_dotenv
-load_dotenv(r'C:\Users\Oscar Hernandez\.env', override=True)
-sys.path.insert(0, r'C:\Users\Oscar Hernandez\agente-ia')
+load_dotenv(override=True)
+
 
 from datetime import datetime, timezone
 from supabase import create_client
@@ -34,7 +34,7 @@ TTL_VOLATILIDAD_ALTA = 1800  # 30 minutos
 
 # Archivo de log de errores
 LOG_ERRORES = os.path.join(
-    r'C:\Users\Oscar Hernandez\agente-ia\logs',
+    os.path.join(os.path.dirname(os.path.abspath(__file__)), 'logs'),
     f"errores_{datetime.now().strftime('%Y%m%d')}.log"
 )
 

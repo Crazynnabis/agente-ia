@@ -3,11 +3,11 @@ import os
 import asyncio
 import sys
 
-os.environ["DOTENV_PATH"] = r'C:\Users\Oscar Hernandez\.env'
-from dotenv import load_dotenv
-load_dotenv(r'C:\Users\Oscar Hernandez\.env', override=True)
 
-sys.path.insert(0, r'C:\Users\Oscar Hernandez\agente-ia')
+from dotenv import load_dotenv
+load_dotenv(override=True)
+
+
 
 from datetime import datetime
 from agente_financiero.agente_velas import analizar_oportunidades

@@ -11,7 +11,7 @@ from agente_financiero.logger_trading import log_orden, log_cierre
 from agente_financiero.alertas_telegram import alerta_orden_ejecutada, alerta_cierre
 from agente_financiero.trailing_stop import gestor_trailing
 
-load_dotenv(r'C:\Users\Oscar Hernandez\.env', override=True)
+load_dotenv(override=True)
 load_dotenv(override=False)
 
 SIMBOLO_MAP = {
@@ -32,7 +32,7 @@ PERDIDA_MAXIMA_PCT = -5.0
 
 def obtener_cliente():
     try:
-        load_dotenv(r'C:\Users\Oscar Hernandez\.env', override=True)
+        load_dotenv(override=True)
         load_dotenv(override=False)
         key    = os.getenv("ALPACA_API_KEY")
         secret = os.getenv("ALPACA_SECRET_KEY")

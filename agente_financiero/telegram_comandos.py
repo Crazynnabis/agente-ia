@@ -7,7 +7,7 @@ import asyncio
 from datetime import datetime, timezone
 from dotenv import load_dotenv
 
-load_dotenv(r'C:\Users\Oscar Hernandez\.env', override=True)
+load_dotenv(override=True)
 
 TOKEN   = os.getenv("TELEGRAM_TOKEN")
 CHAT_ID = os.getenv("TELEGRAM_CHAT_ID")
@@ -203,7 +203,7 @@ async def procesar_comando(comando: str) -> str:
     elif cmd == "/errores":
         try:
             log_file = os.path.join(
-                r'C:\Users\Oscar Hernandez\agente-ia\logs',
+                os.path.join(os.path.dirname(os.path.abspath(__file__)), 'logs'),
                 f"errores_{datetime.now().strftime('%Y%m%d')}.log"
             )
             if not os.path.exists(log_file):

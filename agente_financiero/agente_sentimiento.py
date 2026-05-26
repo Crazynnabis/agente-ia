@@ -8,7 +8,7 @@ from firecrawl import FirecrawlApp
 from dotenv import load_dotenv
 from nucleo.cliente_ia import chat
 
-load_dotenv(r'C:\Users\Oscar Hernandez\.env', override=True)
+load_dotenv(override=True)
 load_dotenv(override=False)
 
 def obtener_fear_greed() -> dict:

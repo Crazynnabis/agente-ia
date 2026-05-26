@@ -8,7 +8,7 @@ from firecrawl import FirecrawlApp
 import os
 from dotenv import load_dotenv
 
-load_dotenv(r'C:\Users\Oscar Hernandez\.env', override=True)
+load_dotenv(override=True)
 load_dotenv(override=False)
 
 # Activos relacionados con petróleo

@@ -8,7 +8,7 @@ from dotenv import load_dotenv
 from newsapi import NewsApiClient
 from nucleo.cliente_ia import chat
 
-load_dotenv(r'C:\Users\Oscar Hernandez\.env', override=True)
+load_dotenv(override=True)
 load_dotenv(override=False)
 
 FUENTES_NOTICIAS = [

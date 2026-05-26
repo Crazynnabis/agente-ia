@@ -5,7 +5,7 @@ from datetime import datetime
 from dotenv import load_dotenv
 
 # Carga .env tanto en PC como en Railway
-load_dotenv(r'C:\Users\Oscar Hernandez\.env', override=True)
+load_dotenv(override=True)
 load_dotenv(override=False)  # Fallback para Railway
 
 TELEGRAM_TOKEN   = os.getenv("TELEGRAM_TOKEN", "")

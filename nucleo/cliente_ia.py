@@ -4,7 +4,7 @@ import time
 import asyncio
 from collections import deque
 from dotenv import load_dotenv
-load_dotenv(r'C:\Users\Oscar Hernandez\.env', override=True)
+load_dotenv(override=True)
 load_dotenv(override=False)
 
 MODELO_CLAUDE = os.getenv("ANTHROPIC_MODEL", "claude-haiku-4-5-20251001")

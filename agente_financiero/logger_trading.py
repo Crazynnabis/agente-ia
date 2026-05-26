@@ -8,7 +8,7 @@ from collections import defaultdict
 from supabase import create_client
 from dotenv import load_dotenv
 
-load_dotenv(r'C:\Users\Oscar Hernandez\.env', override=True)
+load_dotenv(override=True)
 load_dotenv(override=False)
 
 LOG_DIR  = os.path.join(os.path.dirname(__file__), '..', 'logs')
