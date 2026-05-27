@@ -94,7 +94,6 @@ async def guardar_estado_supabase():
         portafolio = await asyncio.to_thread(obtener_portafolio)
         posiciones = await asyncio.to_thread(obtener_posiciones)
 
-        # Upsert portafolio — siempre id=1, un solo registro actualizado
         sb.table("portafolio").upsert({
             "id":           1,
             "timestamp":    datetime.now().isoformat(),
@@ -113,7 +112,6 @@ async def guardar_estado_supabase():
             "wti":          get_estado("wti_precio") or 0,
         }).execute()
 
-        # Borra posiciones anteriores e inserta las actuales
         sb.table("posiciones").delete().neq("id", 0).execute()
         for p in posiciones:
             sb.table("posiciones").insert({
@@ -713,12 +711,16 @@ async def loop_2m():
             ciclo = _estado["ciclo_2m"]
 
         try:
+            # Pausa manual — guarda estado antes de saltar
             if get_estado("sistema_pausado"):
+                await guardar_estado_supabase()
                 await asyncio.sleep(2 * 60)
                 continue
 
+            # Fuera de horario — guarda estado antes de saltar
             horario = debe_operar()
             if not horario["operar"]:
+                await guardar_estado_supabase()
                 await asyncio.sleep(2 * 60)
                 continue
 
@@ -886,9 +888,8 @@ async def loop_2m():
             log_error("loop_2m", str(e))
             print(f"[2M] Error: {e}")
 
-        # ── Guarda estado en Supabase cada 2 minutos para el dashboard ──
+        # Guarda estado en Supabase cada ciclo para el dashboard
         await guardar_estado_supabase()
-
         await asyncio.sleep(2 * 60)
 
 # ============================================================
