@@ -44,18 +44,17 @@ _claude_sin_creditos    = False
 _claude_sin_creditos_ts = 0
 COOLDOWN_SIN_CREDITOS   = 3600  # 1 hora
 
-# Archivo persistente para Railway — sobrevive reinicios
+# Archivos persistentes para Railway — sobreviven reinicios
 _LOG_LLAMADAS = "/tmp/claude_calls.json"
+_LOG_ESTADO   = "/tmp/claude_estado.json"
 
-def _cargar_llamadas_persistentes():
-    """Carga llamadas previas desde disco — para Railway."""
-    global _llamadas_claude
+def _cargar_estado_persistente():
+    global _llamadas_claude, _claude_sin_creditos, _claude_sin_creditos_ts
     try:
         if os.path.exists(_LOG_LLAMADAS):
             with open(_LOG_LLAMADAS, "r") as f:
                 data = json.load(f)
             ahora = time.time()
-            # Solo carga llamadas de la última hora
             llamadas_validas = [t for t in data if ahora - t < 3600]
             _llamadas_claude = deque(llamadas_validas)
             if llamadas_validas:
@@ -63,11 +62,40 @@ def _cargar_llamadas_persistentes():
     except:
         pass
 
-def _guardar_llamadas_persistentes():
-    """Guarda llamadas en disco — para Railway."""
+    try:
+        if os.path.exists(_LOG_ESTADO):
+            with open(_LOG_ESTADO, "r") as f:
+                estado = json.load(f)
+            ahora = time.time()
+            ts     = estado.get("cooldown_ts", 0)
+            activo = estado.get("cooldown_activo", False)
+
+            if activo and (ahora - ts) < COOLDOWN_SIN_CREDITOS:
+                _claude_sin_creditos    = True
+                _claude_sin_creditos_ts = ts
+                restante = int((COOLDOWN_SIN_CREDITOS - (ahora - ts)) / 60)
+                print(f"[cliente_ia] ⚠ Cooldown restaurado — {restante}min restantes")
+            else:
+                _claude_sin_creditos    = False
+                _claude_sin_creditos_ts = 0
+                print(f"[cliente_ia] Cooldown expirado durante reinicio — Claude disponible")
+    except:
+        pass
+
+def _guardar_estado_persistente():
     try:
         with open(_LOG_LLAMADAS, "w") as f:
             json.dump(list(_llamadas_claude), f)
+    except:
+        pass
+    try:
+        with open(_LOG_ESTADO, "w") as f:
+            json.dump({
+                "cooldown_activo": _claude_sin_creditos,
+                "cooldown_ts":     _claude_sin_creditos_ts,
+                "modelo":          MODELO_CLAUDE,
+                "timestamp":       time.time(),
+            }, f)
     except:
         pass
 
@@ -79,13 +107,13 @@ def _limpiar_llamadas_antiguas():
 def _puede_usar_claude() -> bool:
     global _claude_sin_creditos, _claude_sin_creditos_ts
 
-    # Verifica cooldown por créditos agotados
     if _claude_sin_creditos:
         if time.time() - _claude_sin_creditos_ts < COOLDOWN_SIN_CREDITOS:
             return False
         else:
-            # Cooldown expiró — intenta de nuevo
-            _claude_sin_creditos = False
+            _claude_sin_creditos    = False
+            _claude_sin_creditos_ts = 0
+            _guardar_estado_persistente()
             print("[cliente_ia] Cooldown expirado — reintentando Claude")
 
     _limpiar_llamadas_antiguas()
@@ -93,36 +121,50 @@ def _puede_usar_claude() -> bool:
 
 def _registrar_llamada_claude():
     _llamadas_claude.append(time.time())
-    _guardar_llamadas_persistentes()
+    _guardar_estado_persistente()
 
 def _activar_cooldown_sin_creditos():
-    """Activa cooldown de 1 hora cuando Claude no tiene créditos."""
     global _claude_sin_creditos, _claude_sin_creditos_ts
     _claude_sin_creditos    = True
     _claude_sin_creditos_ts = time.time()
-    # Llena el deque para que el contador muestre 20/20
     ahora = time.time()
     while len(_llamadas_claude) < MAX_LLAMADAS_HORA:
         _llamadas_claude.append(ahora)
-    _guardar_llamadas_persistentes()
-    print("[cliente_ia] ⛔ Sin créditos Claude — cooldown 1 hora activado")
+    _guardar_estado_persistente()
+    print("[cliente_ia] ⚠ Sin créditos Claude — cooldown 1 hora activado y guardado en disco")
+
+def resetear_cooldown_creditos():
+    """
+    Fuerza el reset del cooldown de créditos.
+    Llamar después de recargar créditos en console.anthropic.com
+    También se puede llamar via /reanudar en Telegram.
+    """
+    global _claude_sin_creditos, _claude_sin_creditos_ts
+    _claude_sin_creditos    = False
+    _claude_sin_creditos_ts = 0
+    _guardar_estado_persistente()
+    print("[cliente_ia] ✅ Cooldown reseteado manualmente — Claude disponible")
 
 def obtener_stats_uso() -> dict:
     _limpiar_llamadas_antiguas()
+    restante_cooldown = 0
+    if _claude_sin_creditos:
+        restante_cooldown = max(0, int((COOLDOWN_SIN_CREDITOS - (time.time() - _claude_sin_creditos_ts)) / 60))
     return {
-        "llamadas_ultima_hora": len(_llamadas_claude),
-        "limite_hora":          MAX_LLAMADAS_HORA,
-        "disponibles":          MAX_LLAMADAS_HORA - len(_llamadas_claude),
-        "sin_creditos":         _claude_sin_creditos,
-        "proximo_reset":        f"{int((3600 - (time.time() - _llamadas_claude[0])) / 60)}min" if _llamadas_claude else "N/A",
+        "llamadas_ultima_hora":  len(_llamadas_claude),
+        "limite_hora":           MAX_LLAMADAS_HORA,
+        "disponibles":           MAX_LLAMADAS_HORA - len(_llamadas_claude),
+        "sin_creditos":          _claude_sin_creditos,
+        "cooldown_restante_min": restante_cooldown,
+        "proximo_reset":         f"{int((3600 - (time.time() - _llamadas_claude[0])) / 60)}min" if _llamadas_claude else "N/A",
     }
 
 def _generar_cache_key(mensajes: list, system: str) -> str:
     contenido = system[:100] + (mensajes[-1]["content"][:200] if mensajes else "")
     return str(hash(contenido))
 
-# Carga llamadas previas al importar
-_cargar_llamadas_persistentes()
+# Carga estado previo al importar
+_cargar_estado_persistente()
 
 # ============================================================
 # FALLBACK NUMÉRICO
@@ -185,7 +227,7 @@ def generar_decision_fallback(mensajes: list, system: str = "") -> str:
                 except:
                     continue
 
-    return "\n\n".join(decisiones) if decisiones else "SIN_SEÑALES_FUERTES"
+    return "\n\n".join(decisiones) if decisiones else "SIN_SENALES_FUERTES"
 
 # ============================================================
 # FUNCIÓN PRINCIPAL
@@ -198,23 +240,21 @@ async def chat(mensajes: list, system: str = "",
     es_secundario  = agente in AGENTES_SECUNDARIOS
     puede_claude   = _puede_usar_claude()
 
-    # Agentes secundarios y no clasificados van directo a Ollama
-    if es_secundario or (not es_prioritario and not puede_claude):
-        if not es_secundario:
-            print(f"[cliente_ia] Rate limit — {agente} usando Ollama")
+    if es_secundario:
         return await _llamar_ollama_o_fallback(mensajes, system, agente)
 
-    # Agentes no clasificados con cupo — pueden usar Claude
-    if not es_prioritario and not es_secundario:
-        if not puede_claude:
-            return await _llamar_ollama_o_fallback(mensajes, system, agente)
+    if not es_prioritario:
+        print(f"[cliente_ia] Agente no clasificado — {agente} usando Ollama")
+        return await _llamar_ollama_o_fallback(mensajes, system, agente)
 
-    # Sin cupo para prioritarios — Ollama temporal
     if not puede_claude:
-        print(f"[cliente_ia] Rate limit CRÍTICO — {agente} usando Ollama temporalmente")
+        stats = obtener_stats_uso()
+        if _claude_sin_creditos:
+            print(f"[cliente_ia] Sin créditos — {agente} usando Ollama | cooldown {stats['cooldown_restante_min']}min")
+        else:
+            print(f"[cliente_ia] Rate limit {stats['llamadas_ultima_hora']}/{MAX_LLAMADAS_HORA} — {agente} usando Ollama")
         return await _llamar_ollama_o_fallback(mensajes, system, agente)
 
-    # Verifica cache
     cache_key = _generar_cache_key(mensajes, system)
     ahora     = time.time()
     if cache_key in _cache_respuestas:
@@ -223,7 +263,6 @@ async def chat(mensajes: list, system: str = "",
             print(f"[cliente_ia] Cache hit — {agente} ({int(edad)}s)")
             return _cache_respuestas[cache_key]
 
-    # Llama a Claude
     try:
         import anthropic
         api_key = os.getenv("ANTHROPIC_API_KEY", "")
@@ -255,7 +294,6 @@ async def chat(mensajes: list, system: str = "",
 
     except Exception as e:
         error_str = str(e)
-        # Si es error de créditos — activa cooldown inmediato
         if "credit balance is too low" in error_str or "402" in error_str:
             _activar_cooldown_sin_creditos()
         else:
@@ -273,7 +311,7 @@ async def _llamar_ollama_o_fallback(mensajes: list, system: str, agente: str = "
         msgs.extend(mensajes)
         respuesta = ol.chat(model=MODELO_OLLAMA, messages=msgs)
         texto     = respuesta["message"]["content"]
-        if any(k in texto for k in ["DECISION_", "COMPRAR", "VENDER", "SIN_SEÑALES"]):
+        if any(k in texto for k in ["DECISION_", "COMPRAR", "VENDER", "SIN_SENALES"]):
             return {"texto": texto, "modelo": MODELO_OLLAMA, "fuente": "ollama_local"}
         print(f"[cliente_ia] Ollama formato inválido — {agente} usando fallback")
     except Exception as e:

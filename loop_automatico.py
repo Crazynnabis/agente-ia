@@ -12,7 +12,7 @@ from datetime import datetime, timezone
 from supabase import create_client
 from agente_financiero.digestor_maestro import ejecutar_ciclo_maestro
 from agente_financiero.digestor_acciones import ejecutar_ciclo_acciones, es_horario_mercado
-from agente_financiero.alertas_telegram import enviar_mensaje, alerta_resumen_dia, alerta_señal
+from agente_financiero.alertas_telegram import enviar_mensaje, alerta_resumen_dia, alerta_senal
 from agente_financiero.logger_trading import obtener_estadisticas_dia
 from agente_financiero.horario_trading import debe_operar, obtener_sesion_actual
 from agente_financiero.agente_velas import analizar_oportunidades
@@ -25,6 +25,7 @@ from agente_financiero.ejecutor_alpaca import (
     monitorear_perdidas_excesivas, monitorear_y_ejecutar_trailing
 )
 from agente_financiero.telegram_comandos import escuchar_comandos
+from agente_financiero.validador_datos import validar_lote, resumen_anomalias
 
 ACTIVOS_CRYPTO       = ["BTCUSDT", "ETHUSDT", "SOLUSDT", "BNBUSDT"]
 UMBRAL_VOLATILIDAD   = 3.0
@@ -46,10 +47,10 @@ _estado = {
     "confianza_contexto":      50,
     "fear_greed":              50,
     "wti_precio":              0,
-    "estac_señal":             "NEUTRAL",
+    "estac_senal":             "NEUTRAL",
     "pcr_btc":                 1.0,
     "tabla_maestra":           [],
-    "señales_fuertes":         [],
+    "senales_fuertes":         [],
     "tabla_ts":                0,
     "blacklist":               {},
     "perdidas_consecutivas":   {},
@@ -61,11 +62,11 @@ _estado = {
     "ciclo_15m":               0,
     "ciclo_2m":                0,
     "noticias_alertas":        [],
-    "dxy_señal":               "ESPERAR",
+    "dxy_senal":               "ESPERAR",
     "dxy_datos":               {},
     "modo_conservador":        False,
     "precios_anteriores":      {},
-    "ballenas_señal":          "ESPERAR",
+    "ballenas_senal":          "ESPERAR",
     "ballenas_ts":             0,
     "sistema_pausado":         False,
     "sistema_pausado_ts":      0,
@@ -88,28 +89,27 @@ def log_error(agente: str, error: str):
 # SUPABASE — Guarda portafolio y posiciones
 # ============================================================
 async def guardar_estado_supabase():
-    """Guarda portafolio y posiciones en Supabase para el dashboard."""
     try:
         sb         = create_client(os.getenv("SUPABASE_URL"), os.getenv("SUPABASE_KEY"))
         portafolio = await asyncio.to_thread(obtener_portafolio)
         posiciones = await asyncio.to_thread(obtener_posiciones)
 
         sb.table("portafolio").upsert({
-            "id":           1,
-            "timestamp":    datetime.now().isoformat(),
-            "capital_total":portafolio.get("capital_total", 0),
-            "equity":       portafolio.get("equity", 0),
-            "cash":         portafolio.get("cash", 0),
-            "pnl_dia":      portafolio.get("pnl_dia", 0),
-            "buying_power": portafolio.get("buying_power", 0),
-            "sesgo":        get_estado("sesgo_contexto") or "NEUTRAL",
-            "fear_greed":   get_estado("fear_greed") or 50,
-            "dxy_señal":    get_estado("dxy_señal") or "ESPERAR",
-            "ballenas":     get_estado("ballenas_señal") or "ESPERAR",
-            "modo":         "conservador" if get_estado("modo_conservador") else "normal",
-            "vol_alta":     get_estado("volatilidad_alta") or False,
-            "pcr_btc":      get_estado("pcr_btc") or 1.0,
-            "wti":          get_estado("wti_precio") or 0,
+            "id":            1,
+            "timestamp":     datetime.now().isoformat(),
+            "capital_total": portafolio.get("capital_total", 0),
+            "equity":        portafolio.get("equity", 0),
+            "cash":          portafolio.get("cash", 0),
+            "pnl_dia":       portafolio.get("pnl_dia", 0),
+            "buying_power":  portafolio.get("buying_power", 0),
+            "sesgo":         get_estado("sesgo_contexto") or "NEUTRAL",
+            "fear_greed":    get_estado("fear_greed") or 50,
+            "dxy_senal":     get_estado("dxy_senal") or "ESPERAR",
+            "ballenas":      get_estado("ballenas_senal") or "ESPERAR",
+            "modo":          "conservador" if get_estado("modo_conservador") else "normal",
+            "vol_alta":      get_estado("volatilidad_alta") or False,
+            "pcr_btc":       get_estado("pcr_btc") or 1.0,
+            "wti":           get_estado("wti_precio") or 0,
         }).execute()
 
         sb.table("posiciones").delete().neq("id", 0).execute()
@@ -274,7 +274,7 @@ def obtener_info_modo() -> dict:
         "siguiente_cambio": siguiente_cambio,
         "confianza_minima": 88 if conservador else 80,
         "votos_minimos":    3  if conservador else 2,
-        "tamaño_posicion":  "50%" if conservador else "100%",
+        "tamano_posicion":  "50%" if conservador else "100%",
         "atr_multiplier":   calcular_atr_multiplier(),
     }
 
@@ -313,11 +313,11 @@ async def monitorear_volatilidad(ind_res: list):
             print(f"[volatilidad] ⚡ {alerta['simbolo']} movió {alerta['cambio_pct']:+.2f}% en 15min")
             enviar_mensaje(
                 f"⚡ <b>VOLATILIDAD EXTREMA</b>\n"
-                f"━━━━━━━━━━━━━━━━━━\n"
+                f"{'─'*18}\n"
                 f"{alerta['direccion']} {alerta['simbolo']}\n"
                 f"Movimiento: {alerta['cambio_pct']:+.2f}% en 15min\n"
                 f"Precio actual: ${alerta['precio']:,.4f}\n"
-                f"━━━━━━━━━━━━━━━━━━\n"
+                f"{'─'*18}\n"
                 f"⚠️ Revisa posiciones abiertas\n"
                 f"Usa /posiciones para ver tu exposición"
             )
@@ -343,7 +343,7 @@ async def monitorear_volatilidad(ind_res: list):
 async def monitorear_ballenas():
     try:
         import requests
-        señales_ballenas = []
+        senales_ballenas = []
 
         for simbolo in ["BTCUSDT", "ETHUSDT"]:
             try:
@@ -365,17 +365,17 @@ async def monitorear_ballenas():
                 ratio_compra = vol_bids / total * 100
 
                 if ratio_compra > 70:
-                    señales_ballenas.append({
+                    senales_ballenas.append({
                         "simbolo": simbolo,
-                        "señal":   "COMPRAR",
+                        "senal":   "COMPRAR",
                         "razon":   f"Order book {ratio_compra:.1f}% compras — acumulación ballena",
                         "fuerza":  "alta" if ratio_compra > 80 else "media",
                     })
                     print(f"[ballenas] {simbolo}: acumulación {ratio_compra:.1f}%")
                 elif ratio_compra < 30:
-                    señales_ballenas.append({
+                    senales_ballenas.append({
                         "simbolo": simbolo,
-                        "señal":   "VENDER",
+                        "senal":   "VENDER",
                         "razon":   f"Order book {100-ratio_compra:.1f}% ventas — distribución ballena",
                         "fuerza":  "alta" if ratio_compra < 20 else "media",
                     })
@@ -384,23 +384,23 @@ async def monitorear_ballenas():
             except Exception as e:
                 log_error("ballenas", f"{simbolo}: {e}")
 
-        if señales_ballenas:
-            compras = sum(1 for s in señales_ballenas if s["señal"] == "COMPRAR")
-            ventas  = sum(1 for s in señales_ballenas if s["señal"] == "VENDER")
-            señal   = "COMPRAR" if compras > ventas else ("VENDER" if ventas > compras else "ESPERAR")
-            set_estado("ballenas_señal", señal)
+        if senales_ballenas:
+            compras = sum(1 for s in senales_ballenas if s["senal"] == "COMPRAR")
+            ventas  = sum(1 for s in senales_ballenas if s["senal"] == "VENDER")
+            senal   = "COMPRAR" if compras > ventas else ("VENDER" if ventas > compras else "ESPERAR")
+            set_estado("ballenas_senal", senal)
             set_estado("ballenas_ts", time.time())
 
-            for s in [x for x in señales_ballenas if x["fuerza"] == "alta"]:
+            for s in [x for x in senales_ballenas if x["fuerza"] == "alta"]:
                 enviar_mensaje(
-                    f"🐋 <b>Movimiento de ballena detectado</b>\n"
-                    f"━━━━━━━━━━━━━━━━━━\n"
+                    f"🐳 <b>Movimiento de ballena detectado</b>\n"
+                    f"{'─'*18}\n"
                     f"Activo: {s['simbolo']}\n"
-                    f"Señal: {s['señal']}\n"
+                    f"Señal: {s['senal']}\n"
                     f"📊 {s['razon']}"
                 )
         else:
-            set_estado("ballenas_señal", "ESPERAR")
+            set_estado("ballenas_senal", "ESPERAR")
 
     except Exception as e:
         log_error("ballenas_general", str(e))
@@ -448,26 +448,26 @@ async def loop_4h():
                     log_error(f"loop_4h_{nombre}", str(res))
                     print(f"[4H] Error en {nombre}: {res}")
 
-            estac_señal = estac.get("señal_estacional", "NEUTRAL") if isinstance(estac, dict) else "NEUTRAL"
+            estac_senal = estac.get("senal_estacional", "NEUTRAL") if isinstance(estac, dict) else "NEUTRAL"
             estac_conf  = estac.get("confianza", 50) if isinstance(estac, dict) else 50
 
             alertas_noticias = [n for n in noticias if isinstance(n, dict) and n.get("impacto", 0) >= 6]
             for alerta in alertas_noticias:
-                emoji = "🟢" if alerta.get("señal") == "COMPRAR" else "🔴"
+                emoji = "🟢" if alerta.get("senal") == "COMPRAR" else "🔴"
                 enviar_mensaje(
                     f"📰 <b>NOTICIA ALTO IMPACTO</b> {emoji}\n"
                     f"Activo: {alerta.get('simbolo', 'N/A')}\n"
-                    f"Señal: {alerta.get('señal', 'N/A')}\n"
-                    f"📌 {alerta.get('titulo_top', 'Sin título')}\n"
+                    f"Señal: {alerta.get('senal', 'N/A')}\n"
+                    f"📎 {alerta.get('titulo_top', 'Sin título')}\n"
                     f"Fuente: {alerta.get('fuente_top', 'N/A')}\n"
                     f"Impacto: {alerta.get('impacto', 0)}/10"
                 )
 
-            noticias_con_señal = [n for n in noticias if isinstance(n, dict) and n.get("señal") != "ESPERAR"]
-            print(f"[4H] Noticias: {len(noticias)} activos | {len(noticias_con_señal)} con señal | {len(alertas_noticias)} alto impacto")
+            noticias_con_senal = [n for n in noticias if isinstance(n, dict) and n.get("senal") != "ESPERAR"]
+            print(f"[4H] Noticias: {len(noticias)} activos | {len(noticias_con_senal)} con señal | {len(alertas_noticias)} alto impacto")
 
             with _lock_estado:
-                _estado["estac_señal"]      = estac_señal
+                _estado["estac_senal"]      = estac_senal
                 _estado["noticias_alertas"] = alertas_noticias
                 _estado["contexto_macro"]   = {
                     "trends":      trends,
@@ -478,11 +478,11 @@ async def loop_4h():
                 }
                 _estado["contexto_ts"] = time.time()
 
-            print(f"[4H] Estac={estac_señal} ({estac_conf}%)")
+            print(f"[4H] Estac={estac_senal} ({estac_conf}%)")
             enviar_mensaje(
-                f"📊 <b>Contexto macro actualizado</b>\n"
-                f"Estacionalidad: {estac_señal} ({estac_conf}%)\n"
-                f"Noticias relevantes: {len(noticias_con_señal)}\n"
+                f"📈 <b>Contexto macro actualizado</b>\n"
+                f"Estacionalidad: {estac_senal} ({estac_conf}%)\n"
+                f"Noticias relevantes: {len(noticias_con_senal)}\n"
                 f"Hora: {datetime.now().strftime('%H:%M:%S')}"
             )
 
@@ -524,11 +524,11 @@ async def loop_1h():
                 return_exceptions=True
             )
 
-            if isinstance(sent,     Exception): sent    = {}; log_error("loop_1h_sent", str(sent))
-            if isinstance(macro,    Exception): macro   = {}; log_error("loop_1h_macro", str(macro))
-            if isinstance(petro,    Exception): petro   = {}; log_error("loop_1h_petro", str(petro))
-            if isinstance(opciones, Exception): opciones= []; log_error("loop_1h_opciones", str(opciones))
-            if isinstance(dxy,      Exception): dxy     = {"señal": "ESPERAR", "error": True}
+            if isinstance(sent,     Exception): sent     = {}; log_error("loop_1h_sent",    str(sent))
+            if isinstance(macro,    Exception): macro    = {}; log_error("loop_1h_macro",   str(macro))
+            if isinstance(petro,    Exception): petro    = {}; log_error("loop_1h_petro",   str(petro))
+            if isinstance(opciones, Exception): opciones = []; log_error("loop_1h_opciones",str(opciones))
+            if isinstance(dxy,      Exception): dxy      = {"senal": "ESPERAR", "error": True}
 
             fg_valor       = sent.get("fear_greed", {}).get("valor_hoy", 50) if isinstance(sent, dict) else 50
             wti            = petro.get("precios", {}).get("WTI", {}).get("precio", 0) if isinstance(petro, dict) else 0
@@ -536,44 +536,67 @@ async def loop_1h():
             opciones_lista = opciones if isinstance(opciones, list) else []
             opciones_btc   = next((o for o in opciones_lista if o.get("moneda") == "BTC"), {})
             pcr_btc        = opciones_btc.get("pcr_volumen", 1.0)
-            opciones_señal = opciones_btc.get("señal", "ESPERAR")
-            estac_señal    = get_estado("estac_señal") or "NEUTRAL"
+            opciones_senal = opciones_btc.get("senal", "ESPERAR")
 
-            dxy_señal     = dxy.get("señal", "ESPERAR") if isinstance(dxy, dict) else "ESPERAR"
+            dxy_senal     = dxy.get("senal", "ESPERAR") if isinstance(dxy, dict) else "ESPERAR"
             dxy_actual    = dxy.get("dxy_actual", 0) if isinstance(dxy, dict) else 0
             dxy_cambio_1h = dxy.get("dxy_cambio_1h", 0) if isinstance(dxy, dict) else 0
             correlacion   = dxy.get("correlacion", 0) if isinstance(dxy, dict) else 0
 
-            print(f"[1H] DXY={dxy_actual:.2f} ({dxy_cambio_1h:+.2f}% 1h) | Corr={correlacion:.2f} | Señal={dxy_señal}")
+            # ── Validación de datos anómalos ──────────────────────────
+            # Evita que datos corruptos (PCR=7, WTI=92 fuera de rango, etc.)
+            # contaminen el sesgo de mercado y las decisiones de trading.
+            datos_validados, anomalias_detectadas = validar_lote({
+                "pcr_btc":    pcr_btc,
+                "wti":        wti,
+                "fear_greed": fg_valor,
+                "dxy":        dxy_actual,
+            }, contexto="loop_1h")
+
+            if anomalias_detectadas:
+                enviar_mensaje(
+                    f"⚠️ <b>Datos anómalos detectados</b>\n" +
+                    "\n".join(f"• {m.split('—')[1].strip() if '—' in m else m}" for m in anomalias_detectadas)
+                )
+
+            pcr_btc  = datos_validados["pcr_btc"]
+            wti      = datos_validados["wti"]
+            fg_valor = datos_validados["fear_greed"]
+            # dxy_actual ya validado pero solo para log — usamos dxy_senal del agente
+            # ─────────────────────────────────────────────────────────
+
+            print(f"[1H] DXY={dxy_actual:.2f} ({dxy_cambio_1h:+.2f}% 1h) | Corr={correlacion:.2f} | Señal={dxy_senal}")
 
             print(f"[1H] Monitoreando ballenas...")
             await monitorear_ballenas()
-            ballenas_señal = get_estado("ballenas_señal") or "ESPERAR"
-            print(f"[1H] Ballenas: {ballenas_señal}")
+            ballenas_senal = get_estado("ballenas_senal") or "ESPERAR"
+            print(f"[1H] Ballenas: {ballenas_senal}")
 
             noticias_alertas = get_estado("noticias_alertas") or []
-            noticias_compra  = sum(1 for n in noticias_alertas if n.get("señal") == "COMPRAR")
-            noticias_venta   = sum(1 for n in noticias_alertas if n.get("señal") == "VENDER")
+            noticias_compra  = sum(1 for n in noticias_alertas if n.get("senal") == "COMPRAR")
+            noticias_venta   = sum(1 for n in noticias_alertas if n.get("senal") == "VENDER")
+
+            estac_senal = get_estado("estac_senal") or "NEUTRAL"
 
             puntos_alcista = sum([
                 fg_valor > 60,
                 fg_valor > 50 and fg_valor <= 60,
                 wti_cambio < -2,
-                "ALCISTA" in estac_señal,
-                opciones_señal == "COMPRAR",
+                "ALCISTA" in estac_senal,
+                opciones_senal == "COMPRAR",
                 noticias_compra > noticias_venta,
-                dxy_señal == "COMPRAR",
-                ballenas_señal == "COMPRAR",
+                dxy_senal == "COMPRAR",
+                ballenas_senal == "COMPRAR",
             ])
             puntos_bajista = sum([
                 fg_valor < 40,
                 fg_valor >= 40 and fg_valor < 50,
                 wti_cambio > 2,
-                "BAJISTA" in estac_señal,
-                opciones_señal == "VENDER",
+                "BAJISTA" in estac_senal,
+                opciones_senal == "VENDER",
                 noticias_venta > noticias_compra,
-                dxy_señal == "VENDER",
-                ballenas_señal == "VENDER",
+                dxy_senal == "VENDER",
+                ballenas_senal == "VENDER",
             ])
 
             sesgo         = "ALCISTA" if puntos_alcista > puntos_bajista else (
@@ -596,10 +619,10 @@ async def loop_1h():
                 _estado["fear_greed"]         = fg_valor
                 _estado["wti_precio"]         = wti
                 _estado["pcr_btc"]            = pcr_btc
-                _estado["dxy_señal"]          = dxy_señal
+                _estado["dxy_senal"]          = dxy_senal
                 _estado["dxy_datos"]          = dxy if isinstance(dxy, dict) else {}
 
-            print(f"[1H] F&G={fg_valor} | Sesgo={sesgo} ({confianza_ctx}%) | WTI=${wti} | PCR={pcr_btc} | DXY={dxy_señal} | Ballenas={ballenas_señal}")
+            print(f"[1H] F&G={fg_valor} | Sesgo={sesgo} ({confianza_ctx}%) | WTI=${wti} | PCR={pcr_btc} | DXY={dxy_senal} | Ballenas={ballenas_senal}")
 
         except Exception as e:
             log_error("loop_1h", str(e))
@@ -642,17 +665,17 @@ async def loop_15m():
             resultado = await ejecutar_ciclo_maestro()
 
             tabla_maestra = resultado.get("tabla_maestra", [])
-            señales_f     = resultado.get("señales_fuertes", [])
-            señales       = resultado.get("señales_aprobadas", [])
+            senales_f     = resultado.get("senales_fuertes", [])
+            senales       = resultado.get("senales_aprobadas", [])
             ordenes_e     = resultado.get("ordenes_ejecutadas", [])
 
             if resultado.get("operar", True):
                 with _lock_estado:
                     _estado["tabla_maestra"]   = tabla_maestra
-                    _estado["señales_fuertes"] = señales_f
+                    _estado["senales_fuertes"] = senales_f
                     _estado["tabla_ts"]        = time.time()
 
-                print(f"[15M] Señales={len(señales)} | Ordenes={len(ordenes_e)} | ATR={atr_mult}x | MaxOps={max_ops} | Sesgo={sesgo_ctx}")
+                print(f"[15M] Señales={len(senales)} | Ordenes={len(ordenes_e)} | ATR={atr_mult}x | MaxOps={max_ops} | Sesgo={sesgo_ctx}")
 
                 for orden in ordenes_e:
                     if "error" not in orden:
@@ -672,12 +695,12 @@ async def loop_15m():
                 print(f"[15M] NYSE abierto — analizando acciones...")
                 try:
                     res_acc     = await ejecutar_ciclo_acciones()
-                    señales_acc = res_acc.get("señales_fuertes", [])
-                    if señales_acc:
+                    senales_acc = res_acc.get("senales_fuertes", [])
+                    if senales_acc:
                         enviar_mensaje(
-                            "📈 <b>SEÑALES ACCIONES USA</b>\n" + "\n".join([
-                                f"{s['simbolo']}: {s['señal_final']} | conf={s['confianza']}% | ${s['precio']}"
-                                for s in señales_acc
+                            "📊 <b>SEÑALES ACCIONES USA</b>\n" + "\n".join([
+                                f"{s['simbolo']}: {s['senal_final']} | conf={s['confianza']}% | ${s['precio']}"
+                                for s in senales_acc
                             ])
                         )
                 except Exception as e:
@@ -692,7 +715,7 @@ async def loop_15m():
         if ciclo % 480 == 0:
             try:
                 sb = create_client(os.getenv("SUPABASE_URL"), os.getenv("SUPABASE_KEY"))
-                sb.table("señales_trading").select("id").limit(1).execute()
+                sb.table("senales_trading").select("id").limit(1).execute()
                 print("[15M] Ping Supabase OK")
             except Exception as e:
                 log_error("ping_supabase", str(e))
@@ -711,13 +734,11 @@ async def loop_2m():
             ciclo = _estado["ciclo_2m"]
 
         try:
-            # Pausa manual — guarda estado antes de saltar
             if get_estado("sistema_pausado"):
                 await guardar_estado_supabase()
                 await asyncio.sleep(2 * 60)
                 continue
 
-            # Fuera de horario — guarda estado antes de saltar
             horario = debe_operar()
             if not horario["operar"]:
                 await guardar_estado_supabase()
@@ -729,13 +750,13 @@ async def loop_2m():
             params         = obtener_parametros_ejecucion()
             sesgo_ctx      = get_estado("sesgo_contexto") or "NEUTRAL"
             atr_mult       = calcular_atr_multiplier()
-            dxy_señal      = get_estado("dxy_señal") or "ESPERAR"
-            ballenas_señal = get_estado("ballenas_señal") or "ESPERAR"
+            dxy_senal      = get_estado("dxy_senal") or "ESPERAR"
+            ballenas_senal = get_estado("ballenas_senal") or "ESPERAR"
             vol_alta       = get_estado("volatilidad_alta")
 
             modo_txt = "🌙 CONSERVADOR" if conservador else "☀️ NORMAL"
             vol_txt  = " | 🚨 VOL_ALTA" if vol_alta else ""
-            print(f"[2M] Ciclo #{ciclo} — {datetime.now().strftime('%H:%M:%S')} | {modo_txt}{vol_txt} | Sesgo={sesgo_ctx} | DXY={dxy_señal} | 🐋={ballenas_señal}")
+            print(f"[2M] Ciclo #{ciclo} — {datetime.now().strftime('%H:%M:%S')} | {modo_txt}{vol_txt} | Sesgo={sesgo_ctx} | DXY={dxy_senal} | 🐳={ballenas_senal}")
 
             try:
                 cerradas = await asyncio.to_thread(monitorear_perdidas_excesivas)
@@ -787,7 +808,7 @@ async def loop_2m():
 
             for ind in ind_res:
                 simbolo   = ind["simbolo"]
-                señal_ind = ind["señal"]
+                senal_ind = ind["senal"]
                 confianza = ind["confianza"]
                 precio    = ind["precio"]
                 atr       = ind.get("atr", {})
@@ -804,45 +825,45 @@ async def loop_2m():
 
                 vela_op     = next((o for o in velas_res["oportunidades"] if simbolo in o["simbolo"]), None)
                 vela_alerta = next((a for a in velas_res["alertas"]       if simbolo in a["simbolo"]), None)
-                señal_velas = "COMPRAR" if vela_op else ("VENDER" if vela_alerta else "NEUTRAL")
+                senal_velas = "COMPRAR" if vela_op else ("VENDER" if vela_alerta else "NEUTRAL")
 
                 of       = next((o for o in of_res  if o.get("simbolo") == simbolo), {})
-                señal_of = "COMPRAR" if "COMPRADORA" in of.get("señal","") else (
-                           "VENDER"  if "VENDEDORA"  in of.get("señal","") else "NEUTRAL")
+                senal_of = "COMPRAR" if "COMPRADORA" in of.get("senal","") else (
+                           "VENDER"  if "VENDEDORA"  in of.get("senal","") else "NEUTRAL")
 
                 fund       = next((f for f in fund_res if f.get("simbolo") == simbolo), {})
-                señal_fund = fund.get("accion", "ESPERAR")
+                senal_fund = fund.get("accion", "ESPERAR")
 
                 noticias_alertas = get_estado("noticias_alertas") or []
                 noticia_alineada = next(
                     (n for n in noticias_alertas
-                     if simbolo in n.get("simbolo", "") and n.get("señal") == señal_ind),
+                     if simbolo in n.get("simbolo", "") and n.get("senal") == senal_ind),
                     None
                 )
                 boost_noticia = 5 if noticia_alineada else 0
 
                 boost_dxy = 0
-                if simbolo == "BTCUSDT" and dxy_señal == señal_ind and dxy_señal != "ESPERAR":
+                if simbolo == "BTCUSDT" and dxy_senal == senal_ind and dxy_senal != "ESPERAR":
                     boost_dxy = 5
 
                 boost_ballenas = 0
-                if simbolo in ["BTCUSDT", "ETHUSDT"] and ballenas_señal == señal_ind and ballenas_señal != "ESPERAR":
+                if simbolo in ["BTCUSDT", "ETHUSDT"] and ballenas_senal == senal_ind and ballenas_senal != "ESPERAR":
                     boost_ballenas = 5
 
                 votos = sum([
-                    señal_velas == señal_ind and señal_ind != "ESPERAR",
-                    señal_of    == señal_ind and señal_ind != "ESPERAR",
-                    señal_fund  == señal_ind and señal_ind != "ESPERAR",
+                    senal_velas == senal_ind and senal_ind != "ESPERAR",
+                    senal_of    == senal_ind and senal_ind != "ESPERAR",
+                    senal_fund  == senal_ind and senal_ind != "ESPERAR",
                 ])
 
                 if votos < params["votos_minimos"] or confianza < params["confianza_minima"]:
                     continue
-                if sesgo_ctx == "BAJISTA" and señal_ind == "COMPRAR":
+                if sesgo_ctx == "BAJISTA" and senal_ind == "COMPRAR":
                     continue
-                if sesgo_ctx == "ALCISTA" and señal_ind == "VENDER":
+                if sesgo_ctx == "ALCISTA" and senal_ind == "VENDER":
                     continue
 
-                if señal_ind == "COMPRAR":
+                if senal_ind == "COMPRAR":
                     sl  = round(precio - (atr["atr"] * atr_mult), 4)
                     tp1 = round(precio + (atr["atr"] * atr_mult * 2), 4)
                 else:
@@ -856,23 +877,23 @@ async def loop_2m():
                 confianza_final = min(confianza + (votos * 5) + boost_noticia + boost_dxy + boost_ballenas, 99)
                 extras = []
                 if noticia_alineada:   extras.append(f"📰 {noticia_alineada['titulo_top'][:40]}")
-                if boost_dxy > 0:      extras.append("💵 DXY confirma")
-                if boost_ballenas > 0: extras.append("🐋 Ballenas confirman")
+                if boost_dxy > 0:      extras.append("💱 DXY confirma")
+                if boost_ballenas > 0: extras.append("🐳 Ballenas confirman")
                 if conservador:        extras.append("🌙 modo conservador")
                 razon_extra = " | " + " | ".join(extras) if extras else ""
 
-                print(f"[2M] SEÑAL: {simbolo} {señal_ind} conf={confianza_final}% votos={votos}{' +DXY' if boost_dxy else ''}{' +ballenas' if boost_ballenas else ''}{' +noticia' if boost_noticia else ''}{' 🌙' if conservador else ''}")
+                print(f"[2M] SEÑAL: {simbolo} {senal_ind} conf={confianza_final}% votos={votos}{' +DXY' if boost_dxy else ''}{' +ballenas' if boost_ballenas else ''}{' +noticia' if boost_noticia else ''}{' 🌙' if conservador else ''}")
 
                 orden = ejecutar_orden(
-                    simbolo=simbolo, accion=señal_ind,
+                    simbolo=simbolo, accion=senal_ind,
                     cantidad=cantidad, precio_entrada=precio,
                     stop_loss=sl, take_profit=tp1,
                     atr=atr.get("atr_pct", 0)
                 )
 
                 if "error" not in orden:
-                    alerta_señal(
-                        simbolo=simbolo, accion=señal_ind,
+                    alerta_senal(
+                        simbolo=simbolo, accion=senal_ind,
                         precio=precio, sl=sl, tp1=tp1,
                         confianza=confianza_final,
                         razon=f"Loop 2m — {votos} fuentes | ATR {atr_mult}x | {sesgo_ctx}{razon_extra}",
@@ -888,7 +909,6 @@ async def loop_2m():
             log_error("loop_2m", str(e))
             print(f"[2M] Error: {e}")
 
-        # Guarda estado en Supabase cada ciclo para el dashboard
         await guardar_estado_supabase()
         await asyncio.sleep(2 * 60)
 
@@ -908,6 +928,7 @@ async def main():
         f"Noticias RSS + DXY + Ballenas activos\n"
         f"Alertas volatilidad >3% + Reset automático 30min\n"
         f"Rate limiter Claude 20/hora activo\n"
+        f"Validación datos anómalos activa\n"
         f"Dashboard Supabase activo\n"
         f"Hora: {datetime.now().strftime('%H:%M:%S')}"
     )
