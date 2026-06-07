@@ -11,9 +11,6 @@ load_dotenv(override=False)
 MODELO_CLAUDE = os.getenv("ANTHROPIC_MODEL", "claude-haiku-4-5-20251001")
 MODELO_OLLAMA = "qwen2.5-coder:7b"
 
-# ============================================================
-# RATE LIMITER — protege créditos Claude
-# ============================================================
 MAX_LLAMADAS_HORA = 20
 
 AGENTES_PRIORITARIOS = {
@@ -22,7 +19,6 @@ AGENTES_PRIORITARIOS = {
     "digestor_riesgo",
 }
 
-# TODOS los demás van a Ollama — lista exhaustiva
 AGENTES_SECUNDARIOS = {
     "agente_sentimiento", "agente_macro", "agente_petroleo",
     "agente_historico", "agente_fundamental", "agente_onchain",
@@ -35,69 +31,89 @@ AGENTES_SECUNDARIOS = {
 
 _cache_respuestas    = {}
 _cache_respuestas_ts = {}
-TTL_CACHE_RESPUESTAS = 600  # 10 minutos
+TTL_CACHE_RESPUESTAS = 600
 
-_llamadas_claude = deque()
-
-# Cooldown cuando Claude falla por créditos — no reintenta por 1 hora
+_llamadas_claude     = deque()
 _claude_sin_creditos    = False
 _claude_sin_creditos_ts = 0
-COOLDOWN_SIN_CREDITOS   = 3600  # 1 hora
+COOLDOWN_SIN_CREDITOS   = 3600
 
-# Archivos persistentes para Railway — sobreviven reinicios
-_LOG_LLAMADAS = "/tmp/claude_calls.json"
-_LOG_ESTADO   = "/tmp/claude_estado.json"
+# ============================================================
+# SUPABASE — contador persistente que sobrevive reinicios
+# ============================================================
+def _get_supabase():
+    try:
+        from supabase import create_client
+        url = os.getenv("SUPABASE_URL")
+        key = os.getenv("SUPABASE_KEY")
+        if url and key:
+            return create_client(url, key)
+    except:
+        pass
+    return None
 
-def _cargar_estado_persistente():
+def _cargar_estado_supabase():
+    """Carga el estado de Claude desde Supabase — sobrevive reinicios de Railway."""
     global _llamadas_claude, _claude_sin_creditos, _claude_sin_creditos_ts
     try:
-        if os.path.exists(_LOG_LLAMADAS):
-            with open(_LOG_LLAMADAS, "r") as f:
-                data = json.load(f)
-            ahora = time.time()
-            llamadas_validas = [t for t in data if ahora - t < 3600]
-            _llamadas_claude = deque(llamadas_validas)
-            if llamadas_validas:
-                print(f"[cliente_ia] Rate limiter restaurado: {len(llamadas_validas)} llamadas previas")
-    except:
-        pass
+        sb = _get_supabase()
+        if not sb:
+            return
+        res = sb.table("portafolio").select(
+            "claude_llamadas_hora, claude_llamadas_ts, claude_cooldown, claude_cooldown_ts"
+        ).eq("id", 1).execute()
 
-    try:
-        if os.path.exists(_LOG_ESTADO):
-            with open(_LOG_ESTADO, "r") as f:
-                estado = json.load(f)
-            ahora = time.time()
-            ts     = estado.get("cooldown_ts", 0)
-            activo = estado.get("cooldown_activo", False)
+        if not res.data:
+            return
 
-            if activo and (ahora - ts) < COOLDOWN_SIN_CREDITOS:
-                _claude_sin_creditos    = True
-                _claude_sin_creditos_ts = ts
-                restante = int((COOLDOWN_SIN_CREDITOS - (ahora - ts)) / 60)
-                print(f"[cliente_ia] ⚠ Cooldown restaurado — {restante}min restantes")
-            else:
-                _claude_sin_creditos    = False
-                _claude_sin_creditos_ts = 0
-                print(f"[cliente_ia] Cooldown expirado durante reinicio — Claude disponible")
-    except:
-        pass
+        data  = res.data[0]
+        ahora = time.time()
 
-def _guardar_estado_persistente():
+        # Restaurar cooldown si sigue vigente
+        cooldown_activo = data.get("claude_cooldown", False)
+        cooldown_ts     = data.get("claude_cooldown_ts", 0) or 0
+
+        if cooldown_activo and (ahora - cooldown_ts) < COOLDOWN_SIN_CREDITOS:
+            _claude_sin_creditos    = True
+            _claude_sin_creditos_ts = cooldown_ts
+            restante = int((COOLDOWN_SIN_CREDITOS - (ahora - cooldown_ts)) / 60)
+            print(f"[cliente_ia] ⚠ Cooldown restaurado desde Supabase — {restante}min restantes")
+        else:
+            _claude_sin_creditos    = False
+            _claude_sin_creditos_ts = 0
+
+        # Restaurar llamadas de la última hora
+        llamadas     = data.get("claude_llamadas_hora", 0) or 0
+        llamadas_ts  = data.get("claude_llamadas_ts", 0) or 0
+
+        # Solo restaurar si el timestamp es de hace menos de 1 hora
+        if llamadas > 0 and llamadas_ts > 0 and (ahora - llamadas_ts) < 3600:
+            # Reconstruir deque con timestamps aproximados
+            for i in range(llamadas):
+                _llamadas_claude.append(llamadas_ts + i)
+            print(f"[cliente_ia] Rate limiter restaurado desde Supabase: {llamadas} llamadas previas")
+        else:
+            _llamadas_claude = deque()
+            print(f"[cliente_ia] Contador limpio — Claude disponible")
+
+    except Exception as e:
+        print(f"[cliente_ia] Error cargando estado Supabase: {e}")
+
+def _guardar_estado_supabase():
+    """Guarda el estado de Claude en Supabase."""
     try:
-        with open(_LOG_LLAMADAS, "w") as f:
-            json.dump(list(_llamadas_claude), f)
-    except:
-        pass
-    try:
-        with open(_LOG_ESTADO, "w") as f:
-            json.dump({
-                "cooldown_activo": _claude_sin_creditos,
-                "cooldown_ts":     _claude_sin_creditos_ts,
-                "modelo":          MODELO_CLAUDE,
-                "timestamp":       time.time(),
-            }, f)
-    except:
-        pass
+        sb = _get_supabase()
+        if not sb:
+            return
+        _limpiar_llamadas_antiguas()
+        sb.table("portafolio").update({
+            "claude_llamadas_hora": len(_llamadas_claude),
+            "claude_llamadas_ts":   int(time.time()),
+            "claude_cooldown":      _claude_sin_creditos,
+            "claude_cooldown_ts":   int(_claude_sin_creditos_ts),
+        }).eq("id", 1).execute()
+    except Exception as e:
+        print(f"[cliente_ia] Error guardando estado Supabase: {e}")
 
 def _limpiar_llamadas_antiguas():
     ahora = time.time()
@@ -113,7 +129,7 @@ def _puede_usar_claude() -> bool:
         else:
             _claude_sin_creditos    = False
             _claude_sin_creditos_ts = 0
-            _guardar_estado_persistente()
+            _guardar_estado_supabase()
             print("[cliente_ia] Cooldown expirado — reintentando Claude")
 
     _limpiar_llamadas_antiguas()
@@ -121,7 +137,7 @@ def _puede_usar_claude() -> bool:
 
 def _registrar_llamada_claude():
     _llamadas_claude.append(time.time())
-    _guardar_estado_persistente()
+    _guardar_estado_supabase()
 
 def _activar_cooldown_sin_creditos():
     global _claude_sin_creditos, _claude_sin_creditos_ts
@@ -130,20 +146,19 @@ def _activar_cooldown_sin_creditos():
     ahora = time.time()
     while len(_llamadas_claude) < MAX_LLAMADAS_HORA:
         _llamadas_claude.append(ahora)
-    _guardar_estado_persistente()
-    print("[cliente_ia] ⚠ Sin créditos Claude — cooldown 1 hora activado y guardado en disco")
+    _guardar_estado_supabase()
+    print("[cliente_ia] ⚠ Sin créditos Claude — cooldown 1 hora activado en Supabase")
 
 def resetear_cooldown_creditos():
     """
-    Fuerza el reset del cooldown de créditos.
-    Llamar después de recargar créditos en console.anthropic.com
-    También se puede llamar via /reanudar en Telegram.
+    Fuerza reset del cooldown. Llamar después de recargar créditos.
     """
     global _claude_sin_creditos, _claude_sin_creditos_ts
     _claude_sin_creditos    = False
     _claude_sin_creditos_ts = 0
-    _guardar_estado_persistente()
-    print("[cliente_ia] ✅ Cooldown reseteado manualmente — Claude disponible")
+    _llamadas_claude.clear()
+    _guardar_estado_supabase()
+    print("[cliente_ia] ✅ Cooldown reseteado — Claude disponible")
 
 def obtener_stats_uso() -> dict:
     _limpiar_llamadas_antiguas()
@@ -163,8 +178,8 @@ def _generar_cache_key(mensajes: list, system: str) -> str:
     contenido = system[:100] + (mensajes[-1]["content"][:200] if mensajes else "")
     return str(hash(contenido))
 
-# Carga estado previo al importar
-_cargar_estado_persistente()
+# Carga estado al importar
+_cargar_estado_supabase()
 
 # ============================================================
 # FALLBACK NUMÉRICO
