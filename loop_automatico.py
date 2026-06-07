@@ -12,7 +12,7 @@ from datetime import datetime, timezone
 from supabase import create_client
 from agente_financiero.digestor_maestro import ejecutar_ciclo_maestro
 from agente_financiero.digestor_acciones import ejecutar_ciclo_acciones, es_horario_mercado
-from agente_financiero.alertas_telegram import enviar_mensaje, alerta_resumen_dia, alerta_senal
+from agente_financiero.alertas_telegram import enviar_mensaje, alerta_resumen_dia, alerta_señal
 from agente_financiero.logger_trading import obtener_estadisticas_dia
 from agente_financiero.horario_trading import debe_operar, obtener_sesion_actual
 from agente_financiero.agente_velas import analizar_oportunidades
@@ -892,7 +892,7 @@ async def loop_2m():
                 )
 
                 if "error" not in orden:
-                    alerta_senal(
+                    alerta_señal(
                         simbolo=simbolo, accion=senal_ind,
                         precio=precio, sl=sl, tp1=tp1,
                         confianza=confianza_final,
