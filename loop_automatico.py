@@ -12,7 +12,7 @@ from datetime import datetime, timezone
 from supabase import create_client
 from agente_financiero.digestor_maestro import ejecutar_ciclo_maestro
 from agente_financiero.digestor_acciones import ejecutar_ciclo_acciones, es_horario_mercado
-from agente_financiero.alertas_telegram import enviar_mensaje, alerta_resumen_dia, alerta_señal
+from agente_financiero.alertas_telegram import enviar_mensaje, alerta_resumen_dia, alerta_senal
 from agente_financiero.logger_trading import obtener_estadisticas_dia
 from agente_financiero.horario_trading import debe_operar, obtener_sesion_actual
 from agente_financiero.agente_velas import analizar_oportunidades
@@ -892,7 +892,7 @@ async def loop_2m():
                 )
 
                 if "error" not in orden:
-                    alerta_señal(
+                    alerta_senal(
                         simbolo=simbolo, accion=senal_ind,
                         precio=precio, sl=sl, tp1=tp1,
                         confianza=confianza_final,
@@ -904,6 +904,63 @@ async def loop_2m():
                 else:
                     log_error("ejecutar_orden", f"{simbolo}: {orden.get('error')}")
                     print(f"[2M] Error orden {simbolo}: {orden.get('error')}")
+
+            # ── Arbitraje estadístico ─────────────────────────────
+            # Solo ejecuta si Z-score > 2 y correlación > 0.7
+            try:
+                from agente_financiero.agente_arbitraje import ejecutar_arbitraje
+                arb_resultados = await asyncio.to_thread(ejecutar_arbitraje)
+                for arb in arb_resultados:
+                    if arb.get("fuerza") not in ["alta", "muy_alta"]:
+                        continue
+                    if abs(arb.get("zscore", 0)) < 2.0:
+                        continue
+                    if arb.get("correlacion", 0) < 0.7:
+                        continue
+                    if get_estado("volatilidad_alta"):
+                        continue
+
+                    sim_a    = arb["simbolo_a"]
+                    sim_b    = arb["simbolo_b"]
+                    accion_a = arb["accion_a"]
+                    precio_a = arb["precio_a"]
+                    sl_a     = arb["sl_a"]
+                    tp1_a    = arb["tp1_a"]
+
+                    if esta_en_blacklist(sim_a):
+                        continue
+                    if any(sim_a in p["simbolo"] for p in posiciones_abiertas):
+                        continue
+
+                    cantidad_arb = calcular_cantidad_por_confianza(80, precio_a, sl_a)
+                    if cantidad_arb <= 0:
+                        continue
+
+                    print(f"[2M] ARBITRAJE: {sim_a}/{sim_b} Z={arb['zscore']} corr={arb['correlacion']} → {accion_a} {sim_a}")
+                    orden_arb = ejecutar_orden(
+                        simbolo=sim_a, accion=accion_a,
+                        cantidad=cantidad_arb, precio_entrada=precio_a,
+                        stop_loss=sl_a, take_profit=tp1_a, atr=0
+                    )
+                    if "error" not in orden_arb:
+                        alerta_senal(
+                            simbolo=sim_a, accion=accion_a,
+                            precio=precio_a, sl=sl_a, tp1=tp1_a,
+                            confianza=80,
+                            razon=f"Arbitraje estadístico {sim_a}/{sim_b} | Z={arb['zscore']} | corr={arb['correlacion']}",
+                            horizonte="2min"
+                        )
+                        enviar_mensaje(
+                            f"📊 <b>Arbitraje ejecutado</b>\n"
+                            f"Par: {sim_a}/{sim_b}\n"
+                            f"Acción: {accion_a} {sim_a}\n"
+                            f"Z-score: {arb['zscore']}\n"
+                            f"Correlación: {arb['correlacion']}\n"
+                            f"Razón: {arb['razon']}"
+                        )
+            except Exception as e:
+                log_error("loop_2m_arbitraje", str(e))
+                print(f"[2M] Error arbitraje: {e}")
 
         except Exception as e:
             log_error("loop_2m", str(e))
