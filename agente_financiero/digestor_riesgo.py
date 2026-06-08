@@ -8,7 +8,7 @@ from nucleo.cliente_ia import chat
 from agente_financiero.gestion_riesgo import GestorRiesgo
 from agente_financiero.filtro_tendencia import filtrar_señal_por_tendencia
 from agente_financiero.horario_trading import debe_operar
-from agente_financiero.logger_trading import log_senal, obtener_estadisticas_dia
+from agente_financiero.logger_trading import log_señal, obtener_estadisticas_dia
 from agente_financiero.agente_calendario import analizar_calendario
 
 gestor = GestorRiesgo()
@@ -61,7 +61,7 @@ async def procesar_senal(senal: dict) -> dict:
     if not fuentes_confirmacion:
         fuentes_confirmacion = ["tecnico"]
 
-    log_senal(
+    log_señal(
         simbolo=simbolo,
         accion=accion,
         precio=precio,
