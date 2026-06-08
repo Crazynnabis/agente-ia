@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>AgenteIA Trading — Dashboard</title>
+<title>AgenteIA Trading — Dashboard v3.2</title>
 <link href="https://fonts.googleapis.com/css2?family=Space+Mono:wght@400;700&family=Syne:wght@400;600;800&display=swap" rel="stylesheet">
 <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/luxon@3/build/global/luxon.min.js"></script>
@@ -70,6 +70,8 @@
   .agent-pill { background:rgba(0,255,148,0.05); border:1px solid rgba(0,255,148,0.1); border-radius:4px; padding:6px 4px; text-align:center; }
   .agent-name { font-family:var(--mono); font-size:8px; color:var(--text-dim); text-transform:uppercase; }
   .agent-status { font-family:var(--mono); font-size:9px; color:var(--accent); margin-top:2px; }
+  .agent-pill.claude { border-color:rgba(88,166,255,0.3); background:rgba(88,166,255,0.05); }
+  .agent-pill.claude .agent-status { color:var(--blue); }
   .ctx-item { display:flex; justify-content:space-between; padding:6px 0; border-bottom:1px solid rgba(28,35,51,0.5); }
   .ctx-item:last-child { border-bottom:none; }
   .ctx-label { font-family:var(--mono); font-size:10px; color:var(--text-dim); }
@@ -88,7 +90,6 @@
   .btn:hover { border-color:var(--accent); color:var(--accent); }
   .loading { font-family:var(--mono); font-size:10px; color:var(--text-dim); text-align:center; padding:16px; }
   .error-msg { font-family:var(--mono); font-size:10px; color:var(--red); text-align:center; padding:8px; }
-  .update-time { font-family:var(--mono); font-size:9px; color:var(--text-dim); }
   @media (max-width:1200px) {
     .metrics-grid { grid-template-columns:repeat(3,1fr); }
     .main-grid { grid-template-columns:1fr; }
@@ -101,7 +102,7 @@
 <body>
 <div class="container">
   <header>
-    <div class="logo">AgenteIA <span>//</span> Trading System v3.1</div>
+    <div class="logo">AgenteIA <span>//</span> Trading System v3.2</div>
     <div class="status-bar">
       <div class="dot"></div>
       <span id="sistema-estado">RAILWAY ACTIVO</span>
@@ -133,7 +134,7 @@
     </div>
     <div class="metric-card">
       <div class="metric-label">Señales Hoy</div>
-      <div class="metric-value" id="señales-hoy">--</div>
+      <div class="metric-value" id="senales-hoy">--</div>
       <div class="metric-sub" id="ordenes-hoy">Órdenes: --</div>
     </div>
     <div class="metric-card">
@@ -222,9 +223,9 @@
     <div class="panel">
       <div class="panel-header">
         <span class="panel-title">Señales Recientes — Supabase</span>
-        <span class="panel-badge" id="badge-señales">LIVE</span>
+        <span class="panel-badge" id="badge-senales">LIVE</span>
       </div>
-      <div class="panel-body" id="lista-señales">
+      <div class="panel-body" id="lista-senales">
         <div class="loading">Cargando señales...</div>
       </div>
     </div>
@@ -269,13 +270,19 @@ const SB_HEADERS = {
 };
 
 const ACTIVOS = ['BTCUSDT','ETHUSDT','SOLUSDT','BNBUSDT'];
+
+// Agentes — los 2 con Claude marcados en azul
 const AGENTES = [
-  'Velas','Indicadores','OrderFlow','Niveles','OnChain',
-  'Correlaciones','Funding','Liquidaciones','Estructura','Vol.Profile',
-  'ORB','VWAP Rev','Gap&Go','Mean Rev','News Mom',
-  'VIX/QQQ','Arbitraje','Manipulación','Sentimiento','Macro',
-  'Fundamental','Histórico','Petróleo','YouTube','G.Trends',
-  'Calendario','Opciones','Estacional'
+  {n:'Velas',claude:false},{n:'Indicadores',claude:false},{n:'OrderFlow',claude:false},
+  {n:'Niveles',claude:false},{n:'OnChain',claude:false},{n:'Correlaciones',claude:false},
+  {n:'Funding',claude:false},{n:'Liquidaciones',claude:false},{n:'Estructura',claude:false},
+  {n:'Vol.Profile',claude:false},{n:'ORB',claude:false},{n:'VWAP Rev',claude:false},
+  {n:'Gap&Go',claude:false},{n:'Mean Rev',claude:false},{n:'News Mom',claude:false},
+  {n:'VIX/QQQ',claude:false},{n:'Arbitraje',claude:false},{n:'Manipulacion',claude:false},
+  {n:'Sentimiento',claude:false},{n:'Macro',claude:false},{n:'Fundamental',claude:false},
+  {n:'Historico',claude:false},{n:'Petroleo',claude:false},{n:'YouTube',claude:false},
+  {n:'G.Trends',claude:false},{n:'Calendario',claude:false},
+  {n:'D.Maestro',claude:true},{n:'D.Riesgo',claude:true},
 ];
 
 let chartPrecio   = null;
@@ -284,27 +291,30 @@ let chartDist     = null;
 let simboloActivo = 'BTCUSDT';
 let pnlHistorial  = [];
 
-// ── Reloj ────────────────────────────────────────────────────
+// Reloj
 setInterval(() => {
   const ahora = new Date();
-  const h     = ahora.getUTCHours();
-  const m     = ahora.getUTCMinutes();
-  document.getElementById('clock').textContent        = ahora.toLocaleTimeString('es-MX');
-  document.getElementById('horario-badge').textContent= `${String(h).padStart(2,'0')}:${String(m).padStart(2,'0')} UTC`;
+  const h = ahora.getUTCHours();
+  const m = ahora.getUTCMinutes();
+  document.getElementById('clock').textContent         = ahora.toLocaleTimeString('es-MX');
+  document.getElementById('horario-badge').textContent = `${String(h).padStart(2,'0')}:${String(m).padStart(2,'0')} UTC`;
   const activo = h >= 8 && h < 22;
-  const el     = document.getElementById('ctx-horario');
+  const el = document.getElementById('ctx-horario');
   el.textContent = activo ? '🟢 Sesión activa' : '🔴 Fuera de horario';
   el.className   = 'ctx-value ' + (activo ? 'positive' : 'negative');
 }, 1000);
 
-// ── Agentes ──────────────────────────────────────────────────
+// Agentes grid
 function renderAgentes() {
   document.getElementById('agentes-grid').innerHTML = AGENTES.map(a =>
-    `<div class="agent-pill"><div class="agent-name">${a}</div><div class="agent-status">● ON</div></div>`
+    `<div class="agent-pill${a.claude?' claude':''}">
+      <div class="agent-name">${a.n}</div>
+      <div class="agent-status">${a.claude?'⬡ CLAUDE':'● ON'}</div>
+    </div>`
   ).join('');
 }
 
-// ── Precios grid ─────────────────────────────────────────────
+// Precios grid
 function initPreciosGrid() {
   document.getElementById('precios-grid').innerHTML = ACTIVOS.map(s =>
     `<div class="price-card" id="price-${s}">
@@ -315,7 +325,7 @@ function initPreciosGrid() {
   ).join('');
 }
 
-// ── WebSocket Binance ────────────────────────────────────────
+// WebSocket Binance
 function conectarWS() {
   const streams = ACTIVOS.map(s => `${s.toLowerCase()}@ticker`).join('/');
   const ws = new WebSocket(`wss://stream.binance.com:9443/stream?streams=${streams}`);
@@ -341,7 +351,7 @@ function conectarWS() {
   ws.onerror = () => ws.close();
 }
 
-// ── Gráficas ─────────────────────────────────────────────────
+// Gráficas
 function initGraficas() {
   chartPrecio = new Chart(document.getElementById('chartPrecio').getContext('2d'), {
     type:'line',
@@ -386,7 +396,7 @@ async function cargarGraficaPrecio(simbolo) {
     chartPrecio.data.datasets[0].data = data.map(k => ({ x:new Date(k[0]), y:parseFloat(k[4]) }));
     document.getElementById('chart-title').textContent = `${simbolo.replace('USDT','/USD')} — 48h`;
     chartPrecio.update('none');
-  } catch(e) { console.error('Error gráfica:', e); }
+  } catch(e) { console.error('Error grafica:', e); }
 }
 
 function cambiarGrafica(simbolo, btn) {
@@ -396,16 +406,14 @@ function cambiarGrafica(simbolo, btn) {
   cargarGraficaPrecio(simbolo);
 }
 
-// ── Supabase: Portafolio ──────────────────────────────────────
+// Supabase: Portafolio
 async function cargarPortafolio() {
   try {
     const r = await fetch(`${SB_URL}/rest/v1/portafolio?id=eq.1`, { headers: SB_HEADERS });
     if (!r.ok) throw new Error(`Supabase ${r.status}`);
     const data = await r.json();
-    if (!data.length) {
-      document.getElementById('capital').textContent = 'Sin datos';
-      return;
-    }
+    if (!data.length) { document.getElementById('capital').textContent = 'Sin datos'; return; }
+
     const d       = data[0];
     const capital = parseFloat(d.capital_total || 0);
     const equity  = parseFloat(d.equity || 0);
@@ -421,7 +429,7 @@ async function cargarPortafolio() {
     document.getElementById('pnl-sub').textContent   = `${pnlPct>=0?'+':''}${pnlPct}%`;
     document.getElementById('pnl-total-badge').textContent = `${pnl>=0?'+':''}$${pnl.toFixed(2)}`;
 
-    // Contexto del loop
+    // Contexto — usa dxy_senal (sin ñ, corregido)
     const sesgo = d.sesgo || 'NEUTRAL';
     const sesgoCls = sesgo==='BAJISTA'?'negative':sesgo==='ALCISTA'?'positive':'neutral';
     document.getElementById('ctx-sesgo').textContent  = sesgo;
@@ -439,7 +447,8 @@ async function cargarPortafolio() {
     document.getElementById('fg-label').textContent     = fgLabel;
     document.getElementById('fg-clasif').textContent    = fgLabel;
 
-    document.getElementById('ctx-dxy').textContent      = d.dxy_señal || 'ESPERAR';
+    // FIX: dxy_senal sin ñ
+    document.getElementById('ctx-dxy').textContent      = d.dxy_senal || 'ESPERAR';
     document.getElementById('ctx-ballenas').textContent = d.ballenas || 'ESPERAR';
     document.getElementById('ctx-pcr').textContent      = parseFloat(d.pcr_btc||1).toFixed(3);
     document.getElementById('ctx-wti').textContent      = d.wti ? `$${parseFloat(d.wti).toFixed(2)}` : '--';
@@ -453,17 +462,15 @@ async function cargarPortafolio() {
     volEl.textContent = d.vol_alta ? '🚨 SÍ — pausando señales' : '✅ Normal';
     volEl.className   = `ctx-value ${d.vol_alta?'negative':'positive'}`;
 
-    // Actualiza timestamp
     const ts = new Date(d.timestamp);
     document.getElementById('ultima-actualizacion').textContent =
       `Actualizado: ${ts.toLocaleTimeString('es-MX')}`;
 
-    // P&L chart
     const hora = ts.toLocaleTimeString('es-MX',{hour:'2-digit',minute:'2-digit'});
     pnlHistorial.push({ x:hora, y:pnl });
     if (pnlHistorial.length > 48) pnlHistorial.shift();
-    chartPnL.data.labels             = pnlHistorial.map(p => p.x);
-    chartPnL.data.datasets[0].data   = pnlHistorial.map(p => p.y);
+    chartPnL.data.labels           = pnlHistorial.map(p => p.x);
+    chartPnL.data.datasets[0].data = pnlHistorial.map(p => p.y);
     chartPnL.data.datasets[0].borderColor = pnl>=0?'#3FB950':'#F85149';
     chartPnL.update('none');
 
@@ -473,16 +480,14 @@ async function cargarPortafolio() {
   }
 }
 
-// ── Supabase: Posiciones ──────────────────────────────────────
+// Supabase: Posiciones
 async function cargarPosiciones() {
   try {
     const r    = await fetch(`${SB_URL}/rest/v1/posiciones?order=simbolo.asc`, { headers: SB_HEADERS });
     if (!r.ok) throw new Error(`Supabase ${r.status}`);
     const data = await r.json();
-
     document.getElementById('num-pos').textContent   = data.length;
     document.getElementById('badge-pos').textContent = `${data.length} ACTIVAS`;
-
     const tbody = document.getElementById('tabla-pos');
     if (!data.length) {
       tbody.innerHTML = '<tr><td colspan="6" class="loading">Sin posiciones abiertas</td></tr>';
@@ -502,31 +507,30 @@ async function cargarPosiciones() {
       </tr>`;
     }).join('');
   } catch(e) {
-    console.error('Error posiciones:', e);
     document.getElementById('tabla-pos').innerHTML = '<tr><td colspan="6" class="error-msg">Error cargando posiciones</td></tr>';
   }
 }
 
-// ── Supabase: Señales ─────────────────────────────────────────
-async function cargarSeñales() {
+// Supabase: Señales
+async function cargarSenales() {
   try {
     const hoy = new Date().toISOString().split('T')[0];
     const r   = await fetch(
-      `${SB_URL}/rest/v1/señales_trading?timestamp=gte.${hoy}&order=timestamp.desc&limit=50`,
+      `${SB_URL}/rest/v1/senales_trading?timestamp=gte.${hoy}&order=timestamp.desc&limit=50`,
       { headers: SB_HEADERS }
     );
     if (!r.ok) throw new Error(`Supabase ${r.status}`);
     const data = await r.json();
 
-    const total   = data.length;
-    const compras = data.filter(s => s.accion==='COMPRAR').length;
-    const ventas  = data.filter(s => s.accion==='VENDER').length;
-    const ganadas = data.filter(s => s.resultado==='ganancia').length;
-    const perdidas= data.filter(s => s.resultado==='perdida').length;
-    const cierres = ganadas + perdidas;
-    const winRate = cierres > 0 ? Math.round(ganadas/cierres*100) : 0;
+    const total    = data.length;
+    const compras  = data.filter(s => s.accion==='COMPRAR').length;
+    const ventas   = data.filter(s => s.accion==='VENDER').length;
+    const ganadas  = data.filter(s => s.resultado==='ganancia').length;
+    const perdidas = data.filter(s => s.resultado==='perdida').length;
+    const cierres  = ganadas + perdidas;
+    const winRate  = cierres > 0 ? Math.round(ganadas/cierres*100) : 0;
 
-    document.getElementById('señales-hoy').textContent  = total;
+    document.getElementById('senales-hoy').textContent  = total;
     document.getElementById('ordenes-hoy').textContent  = `Ejecutadas: ${data.filter(s=>s.aprobada_riesgo).length}`;
     document.getElementById('win-rate').textContent     = `${winRate}%`;
     document.getElementById('win-rate').className       = `metric-value ${winRate>=50?'positive':winRate>0?'neutral':'negative'}`;
@@ -536,7 +540,7 @@ async function cargarSeñales() {
     chartDist.update();
 
     if (data.length) {
-      document.getElementById('lista-señales').innerHTML = data.slice(0,8).map(s => {
+      document.getElementById('lista-senales').innerHTML = data.slice(0,8).map(s => {
         const hora = (s.timestamp||'').slice(11,16);
         const cls  = s.accion==='COMPRAR' ? 'action-buy' : 'action-sell';
         return `<div class="signal-item">
@@ -547,23 +551,20 @@ async function cargarSeñales() {
         </div>`;
       }).join('');
     } else {
-      document.getElementById('lista-señales').innerHTML = '<div class="loading">Sin señales hoy</div>';
+      document.getElementById('lista-senales').innerHTML = '<div class="loading">Sin señales hoy</div>';
     }
-
   } catch(e) {
-    console.error('Error señales:', e);
-    document.getElementById('lista-señales').innerHTML = '<div class="error-msg">Error cargando señales</div>';
+    document.getElementById('lista-senales').innerHTML = '<div class="error-msg">Error cargando señales</div>';
   }
 }
 
-// ── Fear & Greed independiente ────────────────────────────────
+// Fear & Greed independiente
 async function cargarFearGreed() {
   try {
     const r    = await fetch('https://api.alternative.me/fng/?limit=1');
     const data = await r.json();
     const fg   = parseInt(data.data[0].value);
     const label= data.data[0].value_classification;
-    // Solo actualiza si Supabase no tiene datos aún
     if (document.getElementById('fg-num').textContent === '--') {
       document.getElementById('fg-num').textContent       = fg;
       document.getElementById('fg-label').textContent     = label;
@@ -574,18 +575,16 @@ async function cargarFearGreed() {
   } catch(e) { console.error('Error F&G:', e); }
 }
 
-// ── Carga completa ────────────────────────────────────────────
 async function cargarTodo() {
   await Promise.all([
     cargarPortafolio(),
     cargarPosiciones(),
-    cargarSeñales(),
+    cargarSenales(),
     cargarFearGreed(),
   ]);
   await cargarGraficaPrecio(simboloActivo);
 }
 
-// ── Init ──────────────────────────────────────────────────────
 renderAgentes();
 initPreciosGrid();
 initGraficas();
