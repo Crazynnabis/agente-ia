@@ -6,7 +6,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
 from datetime import datetime
 from nucleo.cliente_ia import chat
 from agente_financiero.gestion_riesgo import GestorRiesgo
-from agente_financiero.filtro_tendencia import filtrar_senal_por_tendencia
+from agente_financiero.filtro_tendencia import filtrar_señal_por_tendencia
 from agente_financiero.horario_trading import debe_operar
 from agente_financiero.logger_trading import log_senal, obtener_estadisticas_dia
 from agente_financiero.agente_calendario import analizar_calendario
@@ -39,7 +39,7 @@ async def procesar_senal(senal: dict) -> dict:
     if not horario["operar"]:
         resultado["razones_rechazo"].append(horario["razon"])
 
-    filtro = filtrar_senal_por_tendencia(senal)
+    filtro = filtrar_señal_por_tendencia(senal)
     resultado["tendencia"] = filtro
     if not filtro["aprobada"]:
         resultado["razones_rechazo"].append(filtro["razon"])
