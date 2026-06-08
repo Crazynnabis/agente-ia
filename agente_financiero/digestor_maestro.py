@@ -367,7 +367,7 @@ Analisis: {ciclo_contexto.get('analisis_consolidado','Sin datos')[:300]}
 
     log_ciclo(
         ciclo_num=stats.get("total_ordenes", 0) + 1,
-        senales_detectadas=len(senales_fuertes),
+        señales_detectadas=len(senales_fuertes),
         ordenes_ejecutadas=len(senales_aprobadas),
         duracion_segundos=duracion,
         modelo_usado=respuesta.get("modelo", "N/A")
