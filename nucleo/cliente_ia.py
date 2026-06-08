@@ -11,20 +11,26 @@ load_dotenv(override=False)
 MODELO_CLAUDE = os.getenv("ANTHROPIC_MODEL", "claude-haiku-4-5-20251001")
 MODELO_OLLAMA = "qwen2.5-coder:7b"
 
-MAX_LLAMADAS_HORA = 20
+MAX_LLAMADAS_HORA = 10  # Reducido para controlar costos
 
+# ============================================================
+# SOLO 2 AGENTES usan Claude — los demás van a fallback
+# ============================================================
 AGENTES_PRIORITARIOS = {
-    "digestor_tecnico",
-    "digestor_maestro",
-    "digestor_riesgo",
+    "digestor_maestro",   # Decisión final de trading
+    "digestor_riesgo",    # Aprobación de señales
 }
 
+# Todos los demás van a Ollama/fallback — incluyendo digestores
 AGENTES_SECUNDARIOS = {
     "agente_sentimiento", "agente_macro", "agente_petroleo",
     "agente_historico", "agente_fundamental", "agente_onchain",
     "agente_velas", "agente_correlaciones", "agente_digestor",
-    "digestor_contexto", "digestor_avanzado", "digestor_estrategias",
-    "digestor_acciones", "agente_noticias_rss", "agente_youtube",
+    "digestor_contexto",    # fallback — análisis numérico suficiente
+    "digestor_avanzado",    # fallback — datos estructurados
+    "digestor_estrategias", # fallback — señales numéricas
+    "digestor_tecnico",     # fallback — indicadores calculados
+    "agente_noticias_rss", "agente_youtube",
     "agente_correlacion_dxy", "agente_estacionalidad", "agente_opciones",
     "agente_calendario",
 }
@@ -33,7 +39,7 @@ _cache_respuestas    = {}
 _cache_respuestas_ts = {}
 TTL_CACHE_RESPUESTAS = 600
 
-_llamadas_claude     = deque()
+_llamadas_claude        = deque()
 _claude_sin_creditos    = False
 _claude_sin_creditos_ts = 0
 COOLDOWN_SIN_CREDITOS   = 3600
@@ -53,7 +59,6 @@ def _get_supabase():
     return None
 
 def _cargar_estado_supabase():
-    """Carga el estado de Claude desde Supabase — sobrevive reinicios de Railway."""
     global _llamadas_claude, _claude_sin_creditos, _claude_sin_creditos_ts
     try:
         sb = _get_supabase()
@@ -64,12 +69,12 @@ def _cargar_estado_supabase():
         ).eq("id", 1).execute()
 
         if not res.data:
+            print("[cliente_ia] Fila portafolio id=1 no encontrada — contador limpio")
             return
 
         data  = res.data[0]
         ahora = time.time()
 
-        # Restaurar cooldown si sigue vigente
         cooldown_activo = data.get("claude_cooldown", False)
         cooldown_ts     = data.get("claude_cooldown_ts", 0) or 0
 
@@ -82,14 +87,11 @@ def _cargar_estado_supabase():
             _claude_sin_creditos    = False
             _claude_sin_creditos_ts = 0
 
-        # Restaurar llamadas de la última hora
-        llamadas     = data.get("claude_llamadas_hora", 0) or 0
-        llamadas_ts  = data.get("claude_llamadas_ts", 0) or 0
+        llamadas    = data.get("claude_llamadas_hora", 0) or 0
+        llamadas_ts = data.get("claude_llamadas_ts", 0) or 0
 
-        # Solo restaurar si el timestamp es de hace menos de 1 hora
         if llamadas > 0 and llamadas_ts > 0 and (ahora - llamadas_ts) < 3600:
-            # Reconstruir deque con timestamps aproximados
-            for i in range(llamadas):
+            for i in range(int(llamadas)):
                 _llamadas_claude.append(llamadas_ts + i)
             print(f"[cliente_ia] Rate limiter restaurado desde Supabase: {llamadas} llamadas previas")
         else:
@@ -100,7 +102,6 @@ def _cargar_estado_supabase():
         print(f"[cliente_ia] Error cargando estado Supabase: {e}")
 
 def _guardar_estado_supabase():
-    """Guarda el estado de Claude en Supabase."""
     try:
         sb = _get_supabase()
         if not sb:
@@ -150,9 +151,6 @@ def _activar_cooldown_sin_creditos():
     print("[cliente_ia] ⚠ Sin créditos Claude — cooldown 1 hora activado en Supabase")
 
 def resetear_cooldown_creditos():
-    """
-    Fuerza reset del cooldown. Llamar después de recargar créditos.
-    """
     global _claude_sin_creditos, _claude_sin_creditos_ts
     _claude_sin_creditos    = False
     _claude_sin_creditos_ts = 0
@@ -255,21 +253,22 @@ async def chat(mensajes: list, system: str = "",
     es_secundario  = agente in AGENTES_SECUNDARIOS
     puede_claude   = _puede_usar_claude()
 
-    if es_secundario:
+    # Secundarios y no clasificados → siempre fallback
+    if es_secundario or not es_prioritario:
+        if not es_secundario:
+            print(f"[cliente_ia] Agente no clasificado — {agente} usando fallback")
         return await _llamar_ollama_o_fallback(mensajes, system, agente)
 
-    if not es_prioritario:
-        print(f"[cliente_ia] Agente no clasificado — {agente} usando Ollama")
-        return await _llamar_ollama_o_fallback(mensajes, system, agente)
-
+    # Prioritarios sin Claude disponible → fallback
     if not puede_claude:
         stats = obtener_stats_uso()
         if _claude_sin_creditos:
-            print(f"[cliente_ia] Sin créditos — {agente} usando Ollama | cooldown {stats['cooldown_restante_min']}min")
+            print(f"[cliente_ia] Sin créditos — {agente} usando fallback | cooldown {stats['cooldown_restante_min']}min")
         else:
-            print(f"[cliente_ia] Rate limit {stats['llamadas_ultima_hora']}/{MAX_LLAMADAS_HORA} — {agente} usando Ollama")
+            print(f"[cliente_ia] Rate limit {stats['llamadas_ultima_hora']}/{MAX_LLAMADAS_HORA} — {agente} usando fallback")
         return await _llamar_ollama_o_fallback(mensajes, system, agente)
 
+    # Verificar cache
     cache_key = _generar_cache_key(mensajes, system)
     ahora     = time.time()
     if cache_key in _cache_respuestas:
@@ -278,6 +277,9 @@ async def chat(mensajes: list, system: str = "",
             print(f"[cliente_ia] Cache hit — {agente} ({int(edad)}s)")
             return _cache_respuestas[cache_key]
 
+    # Llamar a Claude — max_tokens reducido para controlar costos
+    max_tokens_real = min(max_tokens, 400)  # Nunca más de 400 tokens de respuesta
+
     try:
         import anthropic
         api_key = os.getenv("ANTHROPIC_API_KEY", "")
@@ -285,7 +287,7 @@ async def chat(mensajes: list, system: str = "",
             cliente  = anthropic.AsyncAnthropic(api_key=api_key)
             kwargs   = {
                 "model":      MODELO_CLAUDE,
-                "max_tokens": max_tokens,
+                "max_tokens": max_tokens_real,
                 "messages":   mensajes,
             }
             if system:
@@ -309,7 +311,7 @@ async def chat(mensajes: list, system: str = "",
 
     except Exception as e:
         error_str = str(e)
-        if "credit balance is too low" in error_str or "402" in error_str:
+        if "credit balance is too low" in error_str or "402" in error_str or "usage limits" in error_str:
             _activar_cooldown_sin_creditos()
         else:
             print(f"[cliente_ia] Claude no disponible: {e}")
