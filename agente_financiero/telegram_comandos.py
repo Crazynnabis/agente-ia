@@ -14,7 +14,7 @@ CHAT_ID = os.getenv("TELEGRAM_CHAT_ID")
 
 HORA_RESUMEN_UTC     = 0
 _resumen_enviado_hoy = False
-ALERTA_USO_UMBRAL    = 18
+ALERTA_USO_UMBRAL    = 8
 _alerta_uso_enviada  = False
 
 def enviar_mensaje_cmd(texto: str) -> bool:
@@ -53,16 +53,16 @@ async def procesar_comando(comando: str) -> str:
             pnl        = portafolio.get("pnl_dia", 0)
             emoji_pnl  = "📈" if pnl >= 0 else "📉"
             pausado    = get_estado("sistema_pausado")
-            emoji_sys  = "⏸️ PAUSADO" if pausado else "🟢 Activo"
+            emoji_sys  = "⏸ PAUSADO" if pausado else "🟢 Activo"
             return (
                 f"📊 <b>Estado del sistema</b>\n"
-                f"━━━━━━━━━━━━━━━━━━\n"
+                f"──────────────────\n"
                 f"Capital: ${portafolio.get('capital_total', 0):,.2f}\n"
                 f"Cash: ${portafolio.get('cash', 0):,.2f}\n"
                 f"Buying power: ${portafolio.get('buying_power', 0):,.2f}\n"
                 f"{emoji_pnl} P&L hoy: ${pnl:,.2f}\n"
                 f"Posiciones abiertas: {len(posiciones)}\n"
-                f"━━━━━━━━━━━━━━━━━━\n"
+                f"──────────────────\n"
                 f"{emoji_sys}\n"
                 f"⏰ {datetime.now().strftime('%H:%M:%S')}"
             )
@@ -74,7 +74,6 @@ async def procesar_comando(comando: str) -> str:
         try:
             from agente_financiero.ejecutor_alpaca import obtener_portafolio, obtener_posiciones
             from agente_financiero.logger_trading import obtener_estadisticas_dia
-
             portafolio  = obtener_portafolio()
             posiciones  = obtener_posiciones()
             stats       = obtener_estadisticas_dia()
@@ -84,32 +83,29 @@ async def procesar_comando(comando: str) -> str:
             equity      = portafolio.get("equity", capital)
             pnl_abierto = sum(p["pnl_usd"] for p in posiciones)
             pnl_emoji   = "📈" if pnl_dia >= 0 else "📉"
-
-            pos_texto = ""
+            pos_texto   = ""
             for p in posiciones:
                 emoji = "🟢" if p["pnl_usd"] >= 0 else "🔴"
                 pos_texto += f"{emoji} {p['simbolo']}: {p['pnl_pct']:+.2f}% (${p['pnl_usd']:+,.2f})\n"
             if not pos_texto:
                 pos_texto = "Sin posiciones abiertas\n"
-
             return (
                 f"💰 <b>Rendimiento en tiempo real</b>\n"
-                f"━━━━━━━━━━━━━━━━━━\n"
+                f"──────────────────\n"
                 f"Capital total: ${capital:,.2f}\n"
                 f"Equity: ${equity:,.2f}\n"
                 f"Cash disponible: ${cash:,.2f}\n"
-                f"━━━━━━━━━━━━━━━━━━\n"
+                f"──────────────────\n"
                 f"{pnl_emoji} <b>P&L hoy: ${pnl_dia:+,.2f}</b>\n"
                 f"P&L posiciones abiertas: ${pnl_abierto:+,.2f}\n"
-                f"━━━━━━━━━━━━━━━━━━\n"
+                f"──────────────────\n"
                 f"<b>Posiciones:</b>\n{pos_texto}"
-                f"━━━━━━━━━━━━━━━━━━\n"
-                f"Señales hoy: {stats.get('total_señales', 0)}\n"
+                f"──────────────────\n"
+                f"Señales hoy: {stats.get('total_senales', 0)}\n"
                 f"Órdenes ejecutadas: {stats.get('total_ordenes', 0)}\n"
-                f"Cierres: {stats.get('total_cierres', 0)}\n"
                 f"Win rate: {stats.get('win_rate', 0):.1f}%\n"
                 f"P&L cerradas: ${stats.get('pnl_total_usd', 0):+,.2f}\n"
-                f"━━━━━━━━━━━━━━━━━━\n"
+                f"──────────────────\n"
                 f"⏰ {datetime.now().strftime('%H:%M:%S')}"
             )
         except Exception as e:
@@ -122,7 +118,7 @@ async def procesar_comando(comando: str) -> str:
             posiciones = obtener_posiciones()
             if not posiciones:
                 return "📭 Sin posiciones abiertas"
-            texto = "📈 <b>Posiciones abiertas:</b>\n━━━━━━━━━━━━━━━━━━\n"
+            texto = "📊 <b>Posiciones abiertas:</b>\n──────────────────\n"
             for p in posiciones:
                 emoji = "🟢" if p["pnl_usd"] >= 0 else "🔴"
                 texto += (
@@ -136,8 +132,8 @@ async def procesar_comando(comando: str) -> str:
         except Exception as e:
             return f"Error obteniendo posiciones: {e}"
 
-    # ── /señales ─────────────────────────────────────────────
-    elif cmd in ["/señales", "/senales"]:
+    # ── /senales ─────────────────────────────────────────────
+    elif cmd in ["/senales", "/señales"]:
         try:
             from agente_financiero.logger_trading import obtener_estadisticas_dia
             stats = obtener_estadisticas_dia()
@@ -145,8 +141,8 @@ async def procesar_comando(comando: str) -> str:
             emoji = "📈" if pnl >= 0 else "📉"
             return (
                 f"📡 <b>Señales de hoy:</b>\n"
-                f"━━━━━━━━━━━━━━━━━━\n"
-                f"Total señales: {stats.get('total_señales', 0)}\n"
+                f"──────────────────\n"
+                f"Total señales: {stats.get('total_senales', 0)}\n"
                 f"Órdenes ejecutadas: {stats.get('total_ordenes', 0)}\n"
                 f"Cierres: {stats.get('total_cierres', 0)}\n"
                 f"Ganancias: {stats.get('ganancias', 0)} | Pérdidas: {stats.get('perdidas', 0)}\n"
@@ -163,17 +159,16 @@ async def procesar_comando(comando: str) -> str:
             from loop_automatico import set_estado, get_estado
             import time
             if get_estado("sistema_pausado"):
-                return "⏸️ El sistema ya está pausado\nUsa /reanudar para continuar"
+                return "⏸ El sistema ya está pausado\nUsa /reanudar para continuar"
             set_estado("sistema_pausado", True)
             set_estado("sistema_pausado_ts", time.time())
-            print(f"[telegram_cmd] Sistema pausado manualmente")
             return (
-                f"⏸️ <b>Sistema pausado</b>\n"
-                f"━━━━━━━━━━━━━━━━━━\n"
+                f"⏸ <b>Sistema pausado</b>\n"
+                f"──────────────────\n"
                 f"Los loops 15m y 2m están detenidos\n"
                 f"Las posiciones abiertas siguen monitoreadas\n"
                 f"El cierre automático >5% sigue activo\n"
-                f"━━━━━━━━━━━━━━━━━━\n"
+                f"──────────────────\n"
                 f"Usa /reanudar para continuar\n"
                 f"⏰ {datetime.now().strftime('%H:%M:%S')}"
             )
@@ -184,16 +179,23 @@ async def procesar_comando(comando: str) -> str:
     elif cmd == "/reanudar":
         try:
             from loop_automatico import set_estado, get_estado
+            from nucleo.cliente_ia import resetear_cooldown_creditos
             if not get_estado("sistema_pausado"):
-                return "▶️ El sistema ya está activo\nNo es necesario reanudar"
+                # Aunque no esté pausado, resetear cooldown si viene de recarga
+                resetear_cooldown_creditos()
+                return (
+                    f"✅ Sistema activo\n"
+                    f"Cooldown Claude reseteado — listo para operar\n"
+                    f"⏰ {datetime.now().strftime('%H:%M:%S')}"
+                )
             set_estado("sistema_pausado", False)
             set_estado("sistema_pausado_ts", 0)
-            print(f"[telegram_cmd] Sistema reanudado manualmente")
+            resetear_cooldown_creditos()
             return (
-                f"▶️ <b>Sistema reanudado</b>\n"
-                f"━━━━━━━━━━━━━━━━━━\n"
+                f"✅ <b>Sistema reanudado</b>\n"
+                f"──────────────────\n"
                 f"Loops 15m y 2m activos\n"
-                f"Buscando señales nuevamente\n"
+                f"Cooldown Claude reseteado\n"
                 f"⏰ {datetime.now().strftime('%H:%M:%S')}"
             )
         except Exception as e:
@@ -203,21 +205,17 @@ async def procesar_comando(comando: str) -> str:
     elif cmd == "/errores":
         try:
             log_file = os.path.join(
-                os.path.join(os.path.dirname(os.path.abspath(__file__)), 'logs'),
+                os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', 'logs'),
                 f"errores_{datetime.now().strftime('%Y%m%d')}.log"
             )
             if not os.path.exists(log_file):
                 return "✅ Sin errores registrados hoy"
-
             with open(log_file, "r", encoding="utf-8") as f:
                 lineas = f.readlines()
-
             if not lineas:
                 return "✅ Sin errores registrados hoy"
-
-            # Muestra los últimos 10 errores
             ultimos = lineas[-10:]
-            texto = f"⚠️ <b>Últimos errores ({len(lineas)} total hoy)</b>\n━━━━━━━━━━━━━━━━━━\n"
+            texto = f"⚠️ <b>Últimos errores ({len(lineas)} total hoy)</b>\n──────────────────\n"
             for linea in ultimos:
                 partes = linea.strip().split(" | ")
                 if len(partes) >= 3:
@@ -229,7 +227,7 @@ async def procesar_comando(comando: str) -> str:
         except Exception as e:
             return f"Error leyendo log: {e}"
 
-    # ── /modo ─────────────────────────────────────────────────
+    # ── /modo ────────────────────────────────────────────────
     elif cmd == "/modo":
         try:
             from loop_automatico import obtener_info_modo
@@ -240,23 +238,21 @@ async def procesar_comando(comando: str) -> str:
             emoji_modo  = "🌙" if conservador else "☀️"
             modo_txt    = "CONSERVADOR" if conservador else "NORMAL"
             emoji_vol   = "🚨" if vol_alta else "✅"
-            emoji_sys   = "⏸️ PAUSADO" if pausado else "▶️ Activo"
-
+            emoji_sys   = "⏸ PAUSADO" if pausado else "✅ Activo"
             return (
                 f"{emoji_modo} <b>Modo de operación actual</b>\n"
-                f"━━━━━━━━━━━━━━━━━━\n"
+                f"──────────────────\n"
                 f"Sistema: {emoji_sys}\n"
                 f"Modo: <b>{modo_txt}</b>\n"
                 f"Hora UTC: {info['hora_utc']:02d}:00\n"
                 f"Próximo cambio: {info['siguiente_cambio']}\n"
-                f"━━━━━━━━━━━━━━━━━━\n"
+                f"──────────────────\n"
                 f"Confianza mínima: {info['confianza_minima']}%\n"
                 f"Votos requeridos: {info['votos_minimos']}\n"
-                f"Tamaño posición: {info['tamaño_posicion']}\n"
+                f"Tamaño posición: {info['tamano_posicion']}\n"
                 f"ATR multiplier: {info['atr_multiplier']}x\n"
-                f"━━━━━━━━━━━━━━━━━━\n"
+                f"──────────────────\n"
                 f"{emoji_vol} Volatilidad alta: {'SÍ — pausando señales <95%' if vol_alta else 'No'}\n"
-                f"━━━━━━━━━━━━━━━━━━\n"
                 f"⏰ {datetime.now().strftime('%H:%M:%S')}"
             )
         except Exception as e:
@@ -271,25 +267,31 @@ async def procesar_comando(comando: str) -> str:
             disponibles = stats["disponibles"]
             limite      = stats["limite_hora"]
             pct         = round(usadas / limite * 100) if limite > 0 else 0
+            bloques     = round(pct / 10)
+            barra       = "█" * bloques + "░" * (10 - bloques)
+            sin_creditos = stats.get("sin_creditos", False)
+            cooldown_min = stats.get("cooldown_restante_min", 0)
 
-            bloques_llenos = round(pct / 10)
-            barra = "█" * bloques_llenos + "░" * (10 - bloques_llenos)
-
-            if pct >= 90:   emoji_uso = "🔴"; estado_uso = "CRÍTICO"
-            elif pct >= 70: emoji_uso = "🟡"; estado_uso = "ALTO"
-            else:           emoji_uso = "🟢"; estado_uso = "NORMAL"
+            if sin_creditos:
+                estado_uso = f"🔴 SIN CRÉDITOS — cooldown {cooldown_min}min"
+            elif pct >= 90:
+                estado_uso = "🔴 CRÍTICO"
+            elif pct >= 70:
+                estado_uso = "🟡 ALTO"
+            else:
+                estado_uso = "🟢 NORMAL"
 
             return (
                 f"🤖 <b>Uso Claude API</b>\n"
-                f"━━━━━━━━━━━━━━━━━━\n"
-                f"{emoji_uso} Estado: {estado_uso}\n"
+                f"──────────────────\n"
+                f"{estado_uso}\n"
                 f"Llamadas: {usadas}/{limite} por hora\n"
                 f"Disponibles: {disponibles}\n"
                 f"[{barra}] {pct}%\n"
-                f"━━━━━━━━━━━━━━━━━━\n"
+                f"──────────────────\n"
                 f"Reset en: {stats.get('proximo_reset', 'N/A')}\n"
-                f"Agentes prioritarios: digestor_tecnico, digestor_maestro, digestor_riesgo\n"
-                f"━━━━━━━━━━━━━━━━━━\n"
+                f"Agentes con Claude: digestor_maestro, digestor_riesgo\n"
+                f"──────────────────\n"
                 f"⏰ {datetime.now().strftime('%H:%M:%S')}"
             )
         except Exception as e:
@@ -305,12 +307,10 @@ async def procesar_comando(comando: str) -> str:
                     blacklist = dict(_estado.get("blacklist", {}))
             except:
                 blacklist = {}
-
             if not blacklist:
                 return "✅ Blacklist vacía — ningún activo bloqueado"
-
             ahora = time.time()
-            texto = "🚫 <b>Activos en blacklist:</b>\n━━━━━━━━━━━━━━━━━━\n"
+            texto = "🚫 <b>Activos en blacklist:</b>\n──────────────────\n"
             for simbolo, ts_desbloqueo in blacklist.items():
                 restante = ts_desbloqueo - ahora
                 if restante > 0:
@@ -356,29 +356,21 @@ async def procesar_comando(comando: str) -> str:
             try:
                 from supabase import create_client
                 sb = create_client(os.getenv("SUPABASE_URL"), os.getenv("SUPABASE_KEY"))
-                sb.table("señales_trading").select("id").limit(1).execute()
+                sb.table("senales_trading").select("id").limit(1).execute()
                 ok.append("Supabase")
             except:
                 errores.append("Supabase")
 
             try:
-                key   = os.getenv("ANTHROPIC_API_KEY", "")
                 stats = obtener_stats_uso()
-                if key and len(key) > 20:
-                    ok.append(f"Claude API ✓ ({stats['llamadas_ultima_hora']}/{stats['limite_hora']}/h)")
+                sin_creditos = stats.get("sin_creditos", False)
+                if sin_creditos:
+                    errores.append(f"Claude API — sin créditos ({stats['cooldown_restante_min']}min cooldown)")
                 else:
-                    errores.append("Claude API — sin créditos")
+                    ok.append(f"Claude API ({stats['llamadas_ultima_hora']}/{stats['limite_hora']}/h)")
             except:
                 errores.append("Claude API")
 
-            try:
-                import requests as req
-                r = req.get("http://localhost:11434/api/tags", timeout=3)
-                ok.append("Ollama local") if r.status_code == 200 else errores.append("Ollama local")
-            except:
-                errores.append("Ollama local")
-
-            # Estado del sistema
             pausado = get_estado("sistema_pausado")
             if pausado:
                 errores.append("Sistema pausado manualmente")
@@ -389,12 +381,12 @@ async def procesar_comando(comando: str) -> str:
 
             return (
                 f"🔧 <b>Health Check</b>\n"
-                f"━━━━━━━━━━━━━━━━━━\n"
+                f"──────────────────\n"
                 f"{estado}\n"
-                f"━━━━━━━━━━━━━━━━━━\n"
+                f"──────────────────\n"
                 f"{ok_txt}\n"
                 f"{err_txt if err_txt else ''}\n"
-                f"━━━━━━━━━━━━━━━━━━\n"
+                f"──────────────────\n"
                 f"⏰ {datetime.now().strftime('%H:%M:%S')}"
             )
         except Exception as e:
@@ -414,11 +406,42 @@ async def procesar_comando(comando: str) -> str:
         except Exception as e:
             return f"Error cerrando posición: {e}"
 
+    # ── /anomalias ───────────────────────────────────────────
+    elif cmd == "/anomalias":
+        try:
+            from agente_financiero.validador_datos import resumen_anomalias
+            return f"🔍 <b>Anomalías en datos de mercado</b>\n──────────────────\n{resumen_anomalias()}\n⏰ {datetime.now().strftime('%H:%M:%S')}"
+        except Exception as e:
+            return f"Error obteniendo anomalías: {e}"
+
+    # ── /trailing ────────────────────────────────────────────
+    elif cmd == "/trailing":
+        try:
+            from agente_financiero.trailing_stop import gestor_trailing
+            posiciones = gestor_trailing.resumen_posiciones()
+            if not posiciones:
+                return "📭 Sin posiciones en trailing stop"
+            texto = "📈 <b>Trailing Stop activo:</b>\n──────────────────\n"
+            for p in posiciones:
+                emoji = "🟢" if p["pnl_pct"] >= 0 else "🔴"
+                tp1   = "✅" if p["tp1_alcanzado"] else "⏳"
+                texto += (
+                    f"{emoji} <b>{p['simbolo']}</b> {p['accion']}\n"
+                    f"   Entrada: ${p['precio_entrada']:,.4f}\n"
+                    f"   Actual: ${p['precio_actual']:,.4f}\n"
+                    f"   Stop: ${p['stop_loss']:,.4f}\n"
+                    f"   P&L: {p['pnl_pct']:+.2f}%\n"
+                    f"   TP1: {tp1}\n\n"
+                )
+            return texto
+        except Exception as e:
+            return f"Error obteniendo trailing: {e}"
+
     # ── /help ────────────────────────────────────────────────
     elif cmd in ["/help", "/ayuda"]:
         return (
             "🤖 <b>Comandos disponibles:</b>\n"
-            "━━━━━━━━━━━━━━━━━━\n"
+            "──────────────────\n"
             "/status — Estado general del sistema\n"
             "/rendimiento — P&L en tiempo real completo\n"
             "/posiciones — Posiciones abiertas con detalle\n"
@@ -428,9 +451,11 @@ async def procesar_comando(comando: str) -> str:
             "/blacklist — Activos bloqueados y tiempo restante\n"
             "/aprendizaje — Reporte de rendimiento por activo\n"
             "/health — Estado de todos los componentes\n"
+            "/trailing — Estado del trailing stop por posición\n"
+            "/anomalias — Datos de mercado anómalos detectados\n"
             "/cerrar SIMBOLO — Cierra posición manualmente\n"
             "/pausa — Pausar sistema manualmente\n"
-            "/reanudar — Reanudar sistema pausado\n"
+            "/reanudar — Reanudar sistema + resetear cooldown Claude\n"
             "/errores — Ver últimos errores del día\n"
             "/help — Esta ayuda"
         )
@@ -438,11 +463,13 @@ async def procesar_comando(comando: str) -> str:
     else:
         return f"❓ Comando no reconocido: {cmd}\nEscribe /help para ver los comandos"
 
+
 async def enviar_resumen_diario():
     try:
         from agente_financiero.ejecutor_alpaca import obtener_portafolio
         from agente_financiero.logger_trading import obtener_estadisticas_dia, obtener_reporte_aprendizaje
         from nucleo.cliente_ia import obtener_stats_uso
+        from agente_financiero.validador_datos import resumen_anomalias
 
         portafolio = obtener_portafolio()
         stats      = obtener_estadisticas_dia()
@@ -452,29 +479,33 @@ async def enviar_resumen_diario():
         win_rate   = stats.get("win_rate", 0)
         wr_emoji   = "🟢" if win_rate >= 50 else ("🟡" if win_rate >= 35 else "🔴")
         reporte    = obtener_reporte_aprendizaje()
+        anomalias  = resumen_anomalias()
 
         mensaje = (
             f"🌙 <b>Resumen diario — {datetime.now().strftime('%d/%m/%Y')}</b>\n"
-            f"━━━━━━━━━━━━━━━━━━\n"
+            f"──────────────────\n"
             f"💰 Capital: ${portafolio.get('capital_total', 0):,.2f}\n"
             f"{pnl_emoji} P&L hoy: ${pnl_dia:+,.2f}\n"
-            f"━━━━━━━━━━━━━━━━━━\n"
-            f"📡 Señales detectadas: {stats.get('total_señales', 0)}\n"
+            f"──────────────────\n"
+            f"📡 Señales detectadas: {stats.get('total_senales', 0)}\n"
             f"⚡ Órdenes ejecutadas: {stats.get('total_ordenes', 0)}\n"
             f"🔒 Cierres: {stats.get('total_cierres', 0)}\n"
             f"✅ Ganancias: {stats.get('ganancias', 0)} | ❌ Pérdidas: {stats.get('perdidas', 0)}\n"
             f"{wr_emoji} Win rate: {win_rate:.1f}%\n"
-            f"━━━━━━━━━━━━━━━━━━\n"
+            f"──────────────────\n"
             f"🤖 Claude usado hoy: {uso_claude['llamadas_ultima_hora']} llamadas\n"
-            f"━━━━━━━━━━━━━━━━━━\n"
-            f"{reporte[:400]}\n"
-            f"━━━━━━━━━━━━━━━━━━\n"
+            f"──────────────────\n"
+            f"{reporte[:300]}\n"
+            f"──────────────────\n"
+            f"{anomalias}\n"
+            f"──────────────────\n"
             f"⏰ Próximo ciclo: sesión Asia 08:00 UTC"
         )
         enviar_mensaje_cmd(mensaje)
         print(f"[telegram_cmd] Resumen diario enviado")
     except Exception as e:
         print(f"[telegram_cmd] Error resumen diario: {e}")
+
 
 async def verificar_alerta_uso_claude():
     global _alerta_uso_enviada
@@ -486,13 +517,11 @@ async def verificar_alerta_uso_claude():
         if usadas >= ALERTA_USO_UMBRAL and not _alerta_uso_enviada:
             enviar_mensaje_cmd(
                 f"⚠️ <b>Alerta uso Claude API</b>\n"
-                f"━━━━━━━━━━━━━━━━━━\n"
+                f"──────────────────\n"
                 f"Llamadas usadas: {usadas}/{MAX_LLAMADAS_HORA}\n"
                 f"Solo quedan {MAX_LLAMADAS_HORA - usadas} llamadas disponibles\n"
-                f"El sistema seguirá operando con Ollama y fallback numérico\n"
                 f"Reset en: {stats.get('proximo_reset', 'N/A')}\n"
-                f"━━━━━━━━━━━━━━━━━━\n"
-                f"Usa /uso para monitorear en tiempo real"
+                f"Usa /uso para monitorear"
             )
             _alerta_uso_enviada = True
         elif usadas < ALERTA_USO_UMBRAL and _alerta_uso_enviada:
@@ -500,6 +529,7 @@ async def verificar_alerta_uso_claude():
 
     except Exception as e:
         print(f"[telegram_cmd] Error verificando uso Claude: {e}")
+
 
 async def escuchar_comandos():
     global _resumen_enviado_hoy
@@ -519,10 +549,9 @@ async def escuchar_comandos():
 
             updates = obtener_updates(offset)
             for update in updates:
-                offset = update["update_id"] + 1
+                offset  = update["update_id"] + 1
                 mensaje = update.get("message", {})
                 texto   = mensaje.get("text", "")
-
                 if texto and texto.startswith("/"):
                     print(f"[telegram_cmd] Procesando comando: {texto}")
                     respuesta = await procesar_comando(texto)
